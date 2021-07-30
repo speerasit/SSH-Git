@@ -1,0 +1,879 @@
+create or replace PACKAGE BODY X_CRR_INSERT_TEMP AS
+
+v_date date := trunc(sysdate-1) ;
+
+
+PROCEDURE CARROT_TEMP AS
+  
+BEGIN
+
+------------------Purge temp daily (SYSDATE -1) -------------------
+DELETE  TEMP_CARROT 
+WHERE TO_DATE(to_char(DATE_INSERT,'DD MON YYYY')) = TRUNC(SYSDATE-1);
+
+------------------ RB_PROMO ------------------
+INSERT INTO TEMP_CARROT -- NUNTAPUK 20210723
+SELECT * FROM
+(
+select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') AS NO,
+            LPAD (source_participant_id,10,'0') AS source_participant_id,
+            LPAD (device_location,12,'0') AS device_location,
+            LPAD (device_id,12,'0') AS device_id,
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') AS ud_subtype,
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') AS txn_date_time,
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0') AS CARD_SERIAL_NUMBER,
+            LPAD (transaction_value,8,'0') AS transaction_value,
+            LPAD (purse_remaining_value,8,'0') AS purse_remaining_value, -- NUNTAPUK 20210727
+            LPAD (passenger_type,8,'0') AS passenger_type, -- NUNTAPUK 20210727
+            'BSS-256' AS STATUS
+             ,STREAMING_SESSION_ID -- NUNTAPUK 20210715
+            ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210715
+            ,'N' AS FLAG -- NUNTAPUK 20210715
+            ,'RB_PROMO' AS file_name  
+             ,NULL AS COMPLETE_DATE	
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value ---- NUNTAPUK 20210720
+            ,aa.STREAMING_SESSION_ID -- NUNTAPUK 20210720
+            --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+            ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count -- NUNTAPUK 20210727
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  INNER JOIN  -- NUNTAPUK 20210720
+                  streaming_session_history b -- NUNTAPUK 20210720
+                  ON aa.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210720
+                  where aa.settlement_date= v_date -- TO_DATE('07-JUL-2021')
+                  and ud_type=3 and ud_subtype in (13)
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+            --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date= v_date -- TO_DATE('07-JUL-2021')
+                  and ud_type=3 and ud_subtype in (19)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+--            order by txn_date_time ---- NUNTAPUK 20210715
+)a where not exists ( -- NUNTAPUK 20210720
+                   select 
+                   source_participant_id ,
+                   device_location,
+                   device_id,
+                   ud_subtype,
+                   CARD_SERIAL_NUMBER,
+                   transaction_value,
+                   purse_remaining_value,   -- NUNTAPUK 20210727
+                   passenger_type,          -- NUNTAPUK 20210727      
+                   STREAMING_SESSION_ID                   
+                   from TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+                   AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+                   AND a.ud_subtype = cr.dc_ud_subtype
+                   AND a.transaction_value = cr.transaction_value
+                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.transaction_value = cr.transaction_value
+                   AND a.purse_remaining_value = cr.purse_remaining_value -- NUNTAPUK 20210727
+                   AND a.passenger_type = cr.passenger_type  -- NUNTAPUK 20210727
+                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+                   AND cr.file_name = 'RB_PROMO')
+                   ORDER BY NO
+;
+
+COMMIT;    
+
+------------------ RB_TL_9990000008 ------------------
+INSERT INTO TEMP_CARROT --NUNTAPUK 20210722
+SELECT * FROM (  -- NUNTAPUK 20210715
+            select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') AS NO , -- NUNTAPUK 20210715 (ALIAS NAME)
+            LPAD (source_participant_id,10,'0')  AS source_participant_id,  -- NUNTAPUK 20210715
+--            '999000000001' AS device_location,  -- NUNTAPUK 20210727
+            LPAD (device_location,12,'0') AS device_location, -- NUNTAPUK 20210715  
+--            '000077391091' AS device_id, -- NUNTAPUK 20210727
+            LPAD (device_id,12,'0') AS device_id, -- NUNTAPUK 20210715
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') AS ud_subtype, -- NUNTAPUK 20210715
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') AS  txn_date_time,-- NUNTAPUK 20210715
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0') AS CARD_SERIAL_NUMBER, -- NUNTAPUK 20210715
+            LPAD (transaction_value,8,'0') AS transaction_value, -- NUNTAPUK 20210715
+            LPAD (purse_remaining_value,8,'0') AS purse_remaining_value,    -- NUNTAPUK 20210727
+            LPAD (passenger_type,8,'0') AS passenger_type,  -- NUNTAPUK 20210727
+            'BSS-256'  AS STATUS -- NUNTAPUK 20210715
+            ,STREAMING_SESSION_ID -- NUNTAPUK 20210715
+            ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210715
+            ,'N' AS FLAG -- NUNTAPUK 20210715
+            ,'RB_TL_9990000008' AS file_name												  											
+             ,NULL AS COMPLETE_DATE	                 
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value   -- NUNTAPUK 20210727 
+			,aa.STREAMING_SESSION_ID -- NUNTAPUK 20210715
+            --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+            ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                   INNER JOIN  -- NUNTAPUK 20210715
+                  streaming_session_history b -- NUNTAPUK 20210715
+                  ON aa.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210715                 
+				  where aa.settlement_date= v_date -- TO_DATE('07-JUL-2021')
+                  and ud_type=3 and ud_subtype in (13)
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+            --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date= v_date -- TO_DATE('07-JUL-2021')
+                  and ud_type=3 and ud_subtype in (19)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+--            order by txn_date_time -- NUNTAPUK 20210727
+)a where not exists ( -- NUNTAPUK 20210715
+                   select 
+                   source_participant_id ,
+                   device_location,
+                   device_id,
+                   ud_subtype,
+                   CARD_SERIAL_NUMBER ,
+                   transaction_value,
+                   purse_remaining_value,  -- NUNTAPUK 20210727
+                   passenger_type,  -- NUNTAPUK 20210727
+                   STREAMING_SESSION_ID                   
+                   from TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+                   AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+                   AND a.ud_subtype = cr.dc_ud_subtype
+                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.transaction_value = cr.transaction_value
+                   AND a.purse_remaining_value = cr.purse_remaining_value  -- NUNTAPUK 20210727
+                   AND a.passenger_type = cr.passenger_type  -- NUNTAPUK 20210727
+                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+                   AND cr.file_name = 'RB_TL_9990000008')
+                   ORDER BY NO
+;
+COMMIT;
+
+------------------ RB_TOPUP_PROMO ------------------
+INSERT INTO TEMP_CARROT --20210722
+SELECT * FROM (
+select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') AS NO ,
+            LPAD (source_participant_id,10,'0') AS source_participant_id  ,
+            LPAD (device_location,12,'0') AS device_location ,
+            LPAD (device_id,12,'0')AS device_id,
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') AS ud_subtype,
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') AS txn_date_time,
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0')AS CARD_SERIAL_NUMBER,
+            LPAD (transaction_value,8,'0') AS transaction_value,
+            LPAD (purse_remaining_value,8,'0') AS purse_remaining_value, -- NUNTAPUK 20210727
+            LPAD (passenger_type,8,'0') AS passenger_type,  -- NUNTAPUK 20210727
+            'BSS-256' AS STATUS 
+            ,STREAMING_SESSION_ID -- NUNTAPUK 20210715
+            ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210715
+            ,'N' AS FLAG -- NUNTAPUK 20210715
+            ,'RB_TOPUP_PROMO' AS file_name
+            ,NULL AS COMPLETE_DATE	
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value   -- NUNTAPUK 20210727
+			,aa.STREAMING_SESSION_ID -- NUNTAPUK 20210715
+             --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+              ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  INNER JOIN  -- NUNTAPUK 20210715
+                  streaming_session_history b -- NUNTAPUK 20210715
+                  ON aa.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210715
+				  where aa.settlement_date= v_date -- TO_DATE('07-JUL-2021')															   
+                  and ud_type=3 and ud_subtype in (10)
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744,559,10771,688,689,690,10688,10689,10690,10688,10689,10690,560,561,562,563,564,565,566,567,568,569,570,571,10574)
+                  --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date= v_date -- TO_DATE('07-JUL-2021')
+                  and ud_type=3 and ud_subtype in (16)
+                 -- and card_serial_number =1231618
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744,559,10771,688,689,690,10688,10689,10690,10688,10689,10690,560,561,562,563,564,565,566,567,568,569,570,571,10574)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+            order by txn_date_time
+)a where not exists ( -- NUNTAPUK 20210715
+                   select 
+                   source_participant_id ,
+                   device_location,
+                   device_id,
+                   ud_subtype,
+                   CARD_SERIAL_NUMBER ,
+                   transaction_value,
+                   purse_remaining_value,  -- NUNTAPUK 20210727
+                   passenger_type,  -- NUNTAPUK 20210727
+                   STREAMING_SESSION_ID                     
+                   from TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+                   AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+                   AND a.ud_subtype = cr.dc_ud_subtype
+                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.transaction_value = cr.transaction_value
+                   AND a.purse_remaining_value = cr.purse_remaining_value  -- NUNTAPUK 20210727
+                   AND a.passenger_type = cr.passenger_type  -- NUNTAPUK 20210727
+                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+                   AND cr.file_name = 'RB_TOPUP_PROMO' )
+                   ORDER BY NO
+;
+COMMIT;
+
+------------------ RB_TL_9990000009 ------------------
+INSERT INTO TEMP_CARROT --NUNTAPUK 20210722
+SELECT * FROM ( --- Nuntapuk 20210716
+			select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') AS NO ,-- NUNTAPUK 20210716
+            LPAD (source_participant_id,10,'0')  AS source_participant_id ,-- NUNTAPUK 20210716
+            LPAD (device_location,12,'0') AS device_location ,-- NUNTAPUK 20210716
+            LPAD (device_id,12,'0') AS device_id,-- NUNTAPUK 20210716
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') AS ud_subtype ,-- NUNTAPUK 20210716
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') AS  txn_date_time,-- NUNTAPUK 20210716
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0') AS CARD_SERIAL_NUMBER, -- NUNTAPUK 20210716
+            LPAD (transaction_value,8,'0') AS transaction_value , -- NUNTAPUK 20210716
+            LPAD (purse_remaining_value,8,'0') AS purse_remaining_value, -- NUNTAPUK 20210727
+            LPAD (passenger_type,8,'0') AS passenger_type,-- NUNTAPUK 20210727
+            'BSS-256' AS STATUS -- NUNTAPUK 20210716
+            ,STREAMING_SESSION_ID -- NUNTAPUK 20210716
+            ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210716
+            ,'N' AS FLAG -- NUNTAPUK 20210716
+            ,'RB_TL_9990000009' AS file_name													  					
+             ,NULL AS COMPLETE_DATE	
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value -- NUNTAPUK 20210727
+			,aa.STREAMING_SESSION_ID -- NUNTAPUK 20210715
+            --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+              ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  INNER JOIN  -- NUNTAPUK 20210716
+                  streaming_session_history b -- NUNTAPUK 20210716
+                  ON aa.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210716
+				  where aa.settlement_date= v_date -- TO_DATE('07-JUL-2021')																
+                  and ud_type=3 and ud_subtype in (10)
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date= v_date -- TO_DATE('07-JUL-2021')
+                  and ud_type=3 and ud_subtype in (16)
+                 -- and card_serial_number =1231618
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+--            order by txn_date_time --20210727
+)a where not exists ( -- NUNTAPUK 20210716
+                   select 
+                   source_participant_id ,
+                   device_location,
+                   device_id,
+                   ud_subtype,
+                   CARD_SERIAL_NUMBER ,
+                   transaction_value,
+                   purse_remaining_value,  -- NUNTAPUK 20210727
+                   passenger_type,  -- NUNTAPUK 20210727
+                   STREAMING_SESSION_ID                         
+                   from TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+                   AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+                   AND a.ud_subtype = cr.dc_ud_subtype
+                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.transaction_value = cr.transaction_value
+                   AND a.purse_remaining_value = cr.purse_remaining_value  -- NUNTAPUK 20210727
+                   AND a.passenger_type = cr.passenger_type  -- NUNTAPUK 20210727
+                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+                   AND cr.file_name = 'RB_TL_9990000009' )
+                   ORDER BY NO                   
+;
+COMMIT;
+
+------------------ RB_TL_9990000007 ------------------
+INSERT INTO TEMP_CARROT --NUNTAPUK 20210722
+SELECT * FROM (
+select 
+            LPAD (row_number() over (order by loc_txn_date_time), 8, '0') AS NO ,-- NUNTAPUK 20210715 (Alias name)
+            LPAD (source_participant_id,10,'0') AS source_participant_id ,-- NUNTAPUK 20210715
+            LPAD (device_location,12,'0') AS device_location ,-- NUNTAPUK 20210715
+            LPAD (to_char(device_id),12,'0') AS device_id ,-- NUNTAPUK 20210715
+            --DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            case 
+            when ud_type = 3 and ud_subtype =3 then '09' -- Multiride Issue
+            when ud_type = 3 and ud_subtype =79 then '19' -- Multiride Issue Reverse
+            when ud_type = 3 and ud_subtype =10 then '09' -- Purse Add
+            when ud_type = 3 and ud_subtype =16 then '19' -- Purse Add Reverse
+            when ud_type = 3 and ud_subtype =39 then '09' -- Purse Add Recover
+            when ud_type = 3 and ud_subtype =91 then '04' -- Purse Use on Exit
+            when ud_type = 3 and ud_subtype =93 then '04' -- Multiride Use on Exit
+            when ud_type = 3 and ud_subtype =118 then '04' -- Purse Compensation Fare
+            when ud_type = 3 and ud_subtype =120 then '04' -- Multiride Compensation Fare
+            when ud_type = 3 and ud_subtype =13 then '04' -- Purse Use
+            when ud_type = 3 and ud_subtype =19 then '14' -- Purse Use Revert
+            end AS ud_subtype,-- NUNTAPUK 20210715
+            to_char(loc_txn_date_time,'YYYYMMDDHH24MISS') AS  txn_date_time ,-- NUNTAPUK 20210715
+            '0' || lpad(CARD_SERIAL_NUMBER,11,'0') AS CARD_SERIAL_NUMBER,-- NUNTAPUK 20210715
+            LPAD (transaction_value,8,'0') AS transaction_value, -- NUNTAPUK 20210715
+            LPAD (purse_remaining_value,8,'0') AS purse_remaining_value, -- NUNTAPUK 20210727
+            LPAD (passenger_type,8,'0') passenger_type, -- NUNTAPUK 20210727
+			STATUS -- NUNTAPUK 20210715
+            ,STREAMING_SESSION_ID -- NUNTAPUK 20210715
+            ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210715
+            ,'N' AS FLAG -- NUNTAPUK 20210715
+            ,'RB_TL_9990000007' AS file_name										  								
+            ,NULL AS COMPLETE_DATE	
+             from (
+--
+      SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              to_char(device_id) as device_id,
+              to_char(device_location) as device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 and cut.product_type <> 256 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     WHEN source_participant_id = 1 and cut.product_type = 256 THEN 'BSS-256'
+                     ELSE 'BSS-256'  
+                END status
+                ,purse_remaining_value -- NUNTAPUK 20210727
+                ,bb.passenger_Type ---- NUNTAPUK 20210727
+                ,CUT.STREAMING_SESSION_ID --NUNTAPUK 20210715				
+            FROM cut_pi_exit CUT
+            left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            INNER JOIN  -- NUNTAPUK 20210715
+            streaming_session_history b -- NUNTAPUK 20210715
+            ON CUT.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210715																																				 
+            WHERE ud_type           = 3
+            AND ud_subtype          in (91,93,118,120) --Purse use on exit,multiride use on exit, Purse Compensation, Multiride Compensation
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND CUT.settlement_date    = v_date -- TO_DATE('07-JUL-2021')
+            and source_participant_id = 1
+            and transaction_value <> 0
+            AND card_serial_number                IN
+              (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+             --   where card_serial_number = 580010262
+                )
+                
+         
+ UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              to_char(device_id) as device_id,
+              to_char(device_location) as device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 and cut.product_type <> 256 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     WHEN source_participant_id = 1 and cut.product_type = 256 THEN 'BSS-256'
+                     ELSE 'BSS-256'  
+                END status
+                ,purse_remaining_value -- NUNTAPUK 20210727
+                ,bb.passenger_Type -- NUNTAPUK 20210727
+                ,CUT.STREAMING_SESSION_ID --NUNTAPUK 20210715				
+            FROM cut_pi_financial CUT
+            left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            --left join syscd_product p on (CUT.DATA_VERSION=P.DATA_VERSION) AND (CUT.product_type=p.product_type) and (CUT.product_issuer_id=p.issuer_id)
+           INNER JOIN  -- NUNTAPUK 20210715
+           streaming_session_history b -- NUNTAPUK 20210715
+           ON CUT.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210715										   
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (3,79) --Multiride issue,reverse
+            AND source_participant_id = 1
+            AND cch_txn_approved    = 'Y'
+            AND iss_txn_reflection  = 'N'
+            AND CUT.settlement_date    = v_date -- TO_DATE('07-JUL-2021')
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+              --  where card_serial_number = 580010262 --
+                )
+  UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              '999000000001' as device_id,
+              '000077391091' as device_location,
+              source_participant_id,
+             'BSS-256' as status
+             ,purse_remaining_value
+             ,bb.passenger_Type
+             ,CUT.STREAMING_SESSION_ID --NUNTAPUK 20210715			 
+            FROM cut_pi_financial CUT
+           left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            INNER JOIN  -- NUNTAPUK 20210715
+            streaming_session_history b -- NUNTAPUK 20210715
+            ON CUT.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210715           
+            where ud_type           = 3
+            AND ud_subtype         IN (10,16,39) --Topup
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND CUT.settlement_date    = v_date -- TO_DATE('07-JUL-2021')
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+ UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              '999000000001' as device_id,
+              '000077391091' as device_location,
+              source_participant_id,
+              'BSS-256'  as status
+              ,purse_remaining_value  -- NUNTAPUK 20210727	
+              ,bb.passenger_Type  -- NUNTAPUK 20210727
+              ,CUT.STREAMING_SESSION_ID --NUNTAPUK 20210715			  
+            FROM cut_pi_financial CUT
+            left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            INNER JOIN  -- NUNTAPUK 20210715
+            streaming_session_history b -- NUNTAPUK 20210715
+            ON CUT.STREAMING_SESSION_ID = b.STREAMING_SESSION_ID -- NUNTAPUK 20210715           
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (13,19) --retail usage
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND source_participant_id <> 91 -- Not give point at BSP usage eff on 12.12.2015 --
+            AND CUT.settlement_date    = v_date -- TO_DATE('07-JUL-2021')
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+                
+--
+--order by loc_txn_date_time    -- NUNTAPUK 20210727     
+--
+))
+a where not exists ( -- NUNTAPUK 20210715 
+                   select 
+                   source_participant_id ,
+                   device_location,
+                   device_id,
+                   ud_subtype,
+                   CARD_SERIAL_NUMBER ,
+                   transaction_value,
+                   purse_remaining_value,  -- NUNTAPUK 20210727
+                   passenger_type,  -- NUNTAPUK 20210727
+                   STREAMING_SESSION_ID              
+                   from TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+                    AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+                   AND a.ud_subtype = cr.dc_ud_subtype
+                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.transaction_value = cr.transaction_value
+                   AND a.purse_remaining_value = cr.purse_remaining_value  -- NUNTAPUK 20210727
+                   AND a.passenger_type = cr.passenger_type  -- NUNTAPUK 20210727
+                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+                   AND cr.file_name = 'RB_TL_9990000007')
+                   ORDER BY NO
+;
+COMMIT;
+/*
+------------------ RB_SP_STATUS ------------------
+INSERT INTO TEMP_CARROT
+SELECT NO,source_participant_id,device_location,device_id,
+ud_subtype,txn_date_time,CARD_SERIAL_NUMBER,transaction_value,
+purse_remaining_value,passenger_type,STATUS,STREAMING_SESSION_ID,
+DATE_INSERT,FLAG,file_name
+FROM (
+select LPAD (row_number() over (order by PARTICIPANT_ID), 8, '0') AS NO, -- NUNTAPUK 20210720
+                     LPAD (PARTICIPANT_ID,10,'0') AS source_participant_id, -- NUNTAPUK 20210720
+                     name, -- NUNTAPUK 20210720
+                     TRIM(short_name) AS short_name, -- NUNTAPUK 20210720
+--                     CASE WHEN PARTICIPANT_ID in (46,75,76,77,501,502,503,504,505,506) THEN 'N'
+--                              ELSE 'Y' END as USAGE,
+                     CASE WHEN IS_CARROT_PARTICIPANT = 1 and participant_id not in (25,42,45,47,50,99,104,105,10023,10025,10043,10067,10097,10114,10116,10189,10190,10203,10205,10208,10209,10223,10225,109,10247,10249,110,300,301,10244,10284,
+                     304,98,10317,52,10327,10367,10366,10380,306,10411,10416,10435,10459,10484,10709,10733,10738,10740,10743,10744) THEN 'N'
+                              ELSE 'Y' END as USAGE, -- NUNTAPUK 20210720
+                     CASE WHEN IS_CARROT_PARTICIPANT = 1 THEN 'Y'
+                              WHEN PARTICIPANT_ID in (1,4,22,41,43) THEN 'Y'
+                     ELSE 'N' END as TOPUP, ---- NUNTAPUK 20210720
+      NULL AS STATUS -- NUNTAPUK 20210720
+     ,NULL AS STREAMING_SESSION_ID -- NUNTAPUK 20210720
+     ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210720
+     ,'N' AS FLAG -- NUNTAPUK 20210720
+     ,'RB_SP_STATUS' AS file_name -- NUNTAPUK 20210720
+     ,NULL AS device_location -- NUNTAPUK 20210720
+     ,NULL AS device_id -- NUNTAPUK 20210720
+     ,NULL AS ud_subtype
+     ,NULL AS txn_date_time -- NUNTAPUK 20210720
+     ,NULL AS CARD_SERIAL_NUMBER -- NUNTAPUK 20210720
+     ,NULL AS transaction_value -- NUNTAPUK 20210720
+     ,NULL AS purse_remaining_value -- NUNTAPUK 20210727
+     ,NULL AS passenger_type -- NUNTAPUK 20210727
+           from v_part1
+           where PARTICIPANT_ID not in (2,10,11,12,14,32,44,88,89,90,91,44001,44002,4294967295)
+           order by PARTICIPANT_ID
+)a where not exists ( -- NUNTAPUK 20210720
+                   select 
+                   source_participant_id --
+--                   device_location,
+--                   device_id,
+--                   transaction_value,
+--                   CARD_SERIAL_NUMBER ,
+--                   ud_subtype ,
+--                   STATUS,
+--                   STREAMING_SESSION_ID,
+--                    ,name --
+--                    ,short_name --
+--                    ,USAGE --
+--                    ,TOPUP --
+                   from bss_nuntapukb.TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+--                   AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+--                   AND a.transaction_value = cr.transaction_value
+--                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.ud_subtype = cr.dc_ud_subtype
+--                   AND a.STATUS = cr.STATUS
+--                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+--                   AND a.name = cr.name -- ADD
+--                   AND a.short_name = cr.short_name -- ADD
+--                   AND a.USAGE = b.USAGE -- ADD
+--                   AND a.TOPUP = b.TOPUP -- ADD
+                   AND cr.file_name = 'RB_SP_STATUS'
+)    
+;
+COMMIT;
+
+------------------ RB_PROMO_DEVICES ------------------
+INSERT INTO TEMP_CARROT
+SELECT NO,source_participant_id,device_location,device_id,
+ud_subtype,txn_date_time,CARD_SERIAL_NUMBER,transaction_value,
+purse_remaining_value,passenger_type,STATUS,STREAMING_SESSION_ID,
+DATE_INSERT,FLAG,file_name
+FROM (
+SELECT 
+      LPAD (row_number() over (order by PARTICIPANT_ID,DEVICE_ID), 8, '0') AS NO, --Nuntapuk 20210720
+      PARTICIPANT_ID AS source_participant_id, --Nuntapuk 20210720
+      location_id, --ADD
+      LOCATION_DESC, --ADD
+      DEVICE_ID, -- FOUND
+      DEVICE_TYPE AS ud_subtype, -- NUNTAPUK 20210720 (Not sure)
+      NULL AS STATUS -- NUNTAPUK 20210720
+     ,NULL AS STREAMING_SESSION_ID -- NUNTAPUK 20210720
+     ,SYSDATE AS DATE_INSERT -- NUNTAPUK 20210720
+     ,'N' AS FLAG -- NUNTAPUK 20210720
+     ,'RB_PROMO_DEVICES' AS file_name -- NUNTAPUK 20210720
+     ,NULL AS device_location -- NUNTAPUK 20210720
+     ,NULL AS txn_date_time -- NUNTAPUK 20210720
+     ,NULL AS CARD_SERIAL_NUMBER -- NUNTAPUK 20210720
+     ,NULL AS transaction_value -- NUNTAPUK 20210720
+     ,NULL AS purse_remaining_value -- NUNTAPUK 20210727
+     ,NULL AS passenger_type -- NUNTAPUK 20210727
+      FROM (
+      SELECT DISTINCT
+      LPAD (first_value(DEVICE.device_status.PARTICIPANT_ID) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC),10,'0') PARTICIPANT_ID,
+      LPAD (first_value(DEVICE.device_status.LOCATION) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC),12,'0') location_id,
+      BSS.CDA.getLocationDesc(first_value(DEVICE.device_status.PARTICIPANT_ID) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC),
+      BSS.CDA.to_LocationID(first_value(DEVICE.device_status.LOCATION) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC))) LOCATION_DESC,
+      LPAD (first_value(DEVICE.device_status.DEVICE_ID) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC), 12, '0') DEVICE_ID,
+      '01' DEVICE_TYPE
+      FROM DEVICE.device_status
+      left join device_status d on DEVICE.device_status.device_id = d.device_id and DEVICE.device_status.PARTICIPANT_ID = d.PARTICIPANT_ID
+      WHERE DEVICE.device_status.status in (3,5)
+      and d.ACTIVE = 'Y')
+      --WHERE LOCATION_DESC not like '{%'
+      ORDER BY PARTICIPANT_ID,DEVICE_ID
+)a where not exists ( -- NUNTAPUK 20210720
+                   select 
+                   source_participant_id ,
+--                   device_location,
+                   device_id,
+--                   transaction_value,
+--                   CARD_SERIAL_NUMBER ,
+                   ud_subtype --,
+--                   STATUS,
+--                   STREAMING_SESSION_ID
+--                  location_id,  ADD
+--                  LOCATION_DESC ADD
+                   from bss_nuntapukb.TEMP_CARROT cr
+                   WHERE a.source_participant_id = cr.source_participant_id
+--                   AND a.device_location = cr.device_location
+                   AND a.device_id = cr.device_id
+--                   AND a.transaction_value = cr.transaction_value
+--                   AND a.CARD_SERIAL_NUMBER = cr.CARD_SERIAL_NUMBER
+                   AND a.ud_subtype = cr.dc_ud_subtype
+--                   AND a.STATUS = cr.STATUS
+--                   AND a.STREAMING_SESSION_ID  = cr.STREAMING_SESSION_ID
+--                   AND a.location_id = cr.location_id
+--                   AND a.LOCATION_DESC = cr.LOCATION_DESC
+                   AND cr.file_name = 'RB_PROMO_DEVICES'
+)
+;
+COMMIT;
+*/
+end CARROT_TEMP;
+
+END X_CRR_INSERT_TEMP;
