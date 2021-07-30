@@ -1,0 +1,1140 @@
+create or replace PACKAGE BODY                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     PKG_FUN AS
+
+  FUNCTION getlocationcodefromdevloc (
+   vdevicelocation IN NUMBER
+   )
+   RETURN NUMBER AS
+   
+   RESULT           syscd_location.location_code%TYPE;
+   
+  BEGIN
+    /* TODO implementation required */
+    
+    SELECT to_number(substr(to_char(vdevicelocation,'XXXXXXXX'),-6,6),'XXXXXXXX') --as location_id_trf 
+    INTO RESULT
+    FROM DUAL;
+
+    RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN 0;
+    
+  END getlocationcodefromdevloc;
+
+  FUNCTION getlocationcodefromdevid (
+   vparticipantid IN NUMBER,
+   vdeviceid IN NUMBER
+   )
+   RETURN NUMBER AS
+   
+   RESULT    syscd_location.location_code%TYPE;
+   
+  BEGIN
+    /* TODO implementation required */
+    
+    SELECT BITAND (LOCATION, 16777215)
+    INTO RESULT
+    FROM device.device_status
+    WHERE device_id = vdeviceid
+    AND participant_id = vparticipantid;
+    
+    RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN 0;
+   
+  END getlocationcodefromdevid;
+  
+   FUNCTION getlocationnamefromlocidtrf (
+   vparticipantid IN NUMBER,
+   vlocationidtrf IN NUMBER,
+   vdataversion IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT     syscd_location.location_name%TYPE;
+   
+  BEGIN
+    /* TODO implementation required */
+    
+    SELECT location_name
+        INTO RESULT
+        FROM SYSTEMCD.SYSCD_LOCATION
+       WHERE participant_id = vparticipantid 
+       AND location_code = vlocationidtrf
+       AND data_version = vdataversion
+       AND location_type = 15 --Retail
+      ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{' || TO_CHAR (vparticipantid) || ',' || TO_CHAR (vlocationidtrf) || '}';
+   
+   END getlocationnamefromlocidtrf;
+   
+   FUNCTION getlocationidfromtxn (
+   vparticipantid IN NUMBER,
+   vdevicelocation IN NUMBER,
+   vdeviceid IN NUMBER,
+   vdataversion IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+             RESULT VARCHAR2(4); 
+             resultcode           syscd_location.location_code%TYPE;
+             
+             BEGIN
+             
+             -- VERSION 2.0 @ SETTLEMENT_DATE 17-SEP-2013
+             -- VERSION 1.0 @ SETTLEMENT_DATE 16-SEP-2013
+             IF pkg_fun.getlocationcodefromdevloc(vdevicelocation) = 0 THEN
+                IF pkg_fun.searchdevlocfromdevsamedate(vdeviceid,NULL) = 0 THEN
+                  resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+                ELSE
+                  
+                  resultcode := pkg_fun.getlocationcodefromdevloc(pkg_fun.searchdevlocfromdevsamedate(vdeviceid,NULL));
+                  --IF resultcode > 9999 THEN
+                  --    resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+                  --END IF;
+                    IF pkg_fun.validatelocationid(vparticipantid,resultcode,vdataversion) = 0 THEN
+                      resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+                      IF pkg_fun.validatelocationid(vparticipantid,resultcode,vdataversion) = 0 THEN
+                          resultcode := 0;
+                      END IF;
+                    END IF;
+                END IF;
+                
+             ELSIF pkg_fun.getlocationcodefromdevloc(vdevicelocation) > 9999 THEN
+                resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+                IF pkg_fun.validatelocationid(vparticipantid,resultcode,vdataversion) = 0 THEN
+                          resultcode := 0;
+                END IF;
+                
+             ELSE
+                resultcode := pkg_fun.getlocationcodefromdevloc(vdevicelocation);
+                IF pkg_fun.validatelocationid(vparticipantid,resultcode,vdataversion) = 0 THEN
+                      resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+                      IF pkg_fun.validatelocationid(vparticipantid,resultcode,vdataversion) = 0 THEN
+                          resultcode := 0;
+                      END IF;
+                    END IF;
+                
+             END IF;
+             
+             RESULT := LPAD (resultcode,4,'0');
+             RETURN RESULT;
+             
+      
+   END getlocationidfromtxn;
+   
+   FUNCTION getlocationnamefromtxn (
+   vparticipantid IN NUMBER,
+   vdevicelocation IN NUMBER,
+   vdeviceid IN NUMBER,
+   vdataversion IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT               syscd_location.location_name%TYPE;
+   resultcode           syscd_location.location_code%TYPE;
+   
+   BEGIN
+   
+   IF pkg_fun.getlocationcodefromdevloc(vdevicelocation) = 0 THEN
+      resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+   
+   ELSIF pkg_fun.getlocationcodefromdevloc(vdevicelocation) > 9999 THEN
+      resultcode := pkg_fun.getlocationcodefromdevid(vparticipantid,vdeviceid);
+      
+   ELSE
+      resultcode := pkg_fun.getlocationcodefromdevloc(vdevicelocation);
+     
+   END IF;
+   
+   SELECT location_name
+        INTO RESULT
+        FROM SYSTEMCD.SYSCD_LOCATION
+       WHERE participant_id = vparticipantid 
+       AND location_code = resultcode
+       AND data_version = vdataversion
+       AND location_type = 15 --Retail
+      ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{' || TO_CHAR (vparticipantid) || ',' || TO_CHAR (resultcode) || '}';
+     
+   END getlocationnamefromtxn;
+   
+   FUNCTION getequipnofromtxn (
+   vparticipantid IN NUMBER,
+   vdeviceid IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT               syscd_location.location_name%TYPE;
+   
+   BEGIN
+   
+   SELECT equipment_no INTO RESULT
+    FROM DEVICE.device_status
+    WHERE device_id = vdeviceid
+    AND participant_id = vparticipantid
+    AND acquirer_id in (11,12)
+    ;
+
+    RETURN LPAD (RESULT,9);
+
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '00000000';
+     
+   END getequipnofromtxn;
+   
+   FUNCTION validatelocationid (
+   vparticipantid IN NUMBER,
+   vlocationidtrf IN NUMBER,
+   vdataversion IN NUMBER
+   )
+   RETURN NUMBER AS
+   
+   RESULT     syscd_location.location_name%TYPE;
+   --RESULT NUMBER;
+   
+                BEGIN
+                  /* TODO implementation required */
+                  
+                 SELECT location_name
+                      INTO RESULT
+                      FROM SYSTEMCD.SYSCD_LOCATION
+                     WHERE participant_id = vparticipantid 
+                     AND location_code = vlocationidtrf
+                     AND data_version = vdataversion
+                     AND location_type = 15 --Retail
+                    ;
+      RETURN 1;
+
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN 0;
+   
+   END validatelocationid;
+   
+   FUNCTION searchdevlocfromdevsamedate (
+   vdeviceid IN NUMBER,
+   vsettledate IN DATE 
+   )
+   RETURN NUMBER AS
+   
+   dtsettledt       DATE   := reports.bkk_int_dfv.getdefaultsettledate;
+   vstdt            DATE;
+   vdevicelocation  NUMBER(20);
+   
+   
+  BEGIN
+    /* TODO implementation required */
+    
+            IF vsettledate IS NULL
+              THEN
+                 vstdt := dtsettledt;
+              ELSE
+                 vstdt := TRUNC (vsettledate);
+              END IF;
+            
+            SELECT device_location INTO vdevicelocation
+            FROM cut_pi_financial cpf
+            WHERE source_participant_id = 42
+            AND cch_flags_txn_forwarded = 'N' 
+            AND cch_txn_approved = 'Y'
+            and ud_type=3
+            and ud_subtype in (13,19)
+            AND settlement_date = vstdt
+            and device_id = vdeviceid
+            and device_location <> 0
+            ;
+             
+              RETURN vdevicelocation;
+              
+           EXCEPTION
+              WHEN OTHERS
+              THEN
+                 RETURN 0;
+   
+   END searchdevlocfromdevsamedate;
+   
+   FUNCTION getstorenamefromtxn (
+   vbsslocid IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT               bss_reports.dmc_loc_map.dmc_store_name%TYPE;
+   
+   BEGIN
+   
+   SELECT dmc_store_name INTO RESULT
+    FROM bss_reports.dmc_loc_map
+    WHERE bss_loc_id = vbsslocid
+    ;
+
+    RETURN RESULT;
+
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN NULL;
+     
+   END getstorenamefromtxn;
+   
+   FUNCTION getstorecodevfromtxn (
+   vbsslocid IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT               bss_reports.dmc_loc_map.dmc_store_code_v%TYPE;
+   
+   BEGIN
+   
+   SELECT dmc_store_code_v INTO RESULT
+    FROM bss_reports.dmc_loc_map
+    WHERE bss_loc_id = vbsslocid
+    ;
+
+    RETURN RESULT;
+
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN NULL;
+     
+   END getstorecodevfromtxn;
+   
+   FUNCTION getbsslocnamefromfunbsslocid (
+   vbsslocid IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT               bss_reports.dmc_loc_map.bss_loc_name%TYPE;
+   
+   BEGIN
+   
+   SELECT bss_loc_name INTO RESULT
+    FROM bss_reports.dmc_loc_map
+    WHERE bss_loc_id = vbsslocid
+    ;
+
+    RETURN RESULT;
+
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN NULL;
+     
+   END getbsslocnamefromfunbsslocid;
+   
+   FUNCTION getcarrotcampaignheader (
+    vsettle_date DATE
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           VARCHAR2(65);
+  
+  BEGIN
+    
+   select 'TLG|' || 
+    LPAD (count(*), 8, '0') || '|' || 
+    TO_CHAR(max(transaction_date_time), 'YYYYMMDDHH24MISS') || '|' ||
+    TO_CHAR(min(transaction_date_time), 'YYYYMMDDHH24MISS') || '|' ||
+    '000001|' || TO_CHAR(sysdate, 'YYYYMMDDHH24MISS') || '|'
+    as record_header into RESULT
+    from (select
+      row_number() over (order by txn_date_time) record_number,
+      lpad(source_participant_id,5,'0') AS sp_code, 
+      lpad(device_location,12,'0') as location_id,
+      lpad(device_id,12,'0') as device_id,
+      decode(ud_subtype,13,'04',19,'14',10,'09',16,'19') as transaction_type_code,
+      txn_date_time+(7/24) as transaction_date_time,
+      card_issuer_id,
+      card_serial_number,
+      '88' || lpad(CARD_SERIAL_NUMBER,9,'0') AS trader_trans_ident,
+      transaction_value,
+      'BSS-256' as product_type,
+      settlement_date,
+      1 as cnt_txn
+      from cut_pi_financial
+      where settlement_date=trunc(vsettle_date) --'11-JUN-2014'
+      and ud_type=3 and ud_subtype in (10,13,16,19)
+      and service_participant_id in (11,12,41,42,43,45)
+      --and source_participant_id not in (10026,10006,10038,10001,42)
+      and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+    order by txn_date_time)
+      ;
+    
+    RETURN RESULT;
+  END getcarrotcampaignheader;
+  
+   FUNCTION getcarrotcampaignheader2 (
+    vsettle_date DATE
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           VARCHAR2(65);
+  
+  BEGIN
+    
+   select 'TLG|' || 
+    LPAD (count(*), 8, '0') || '|' || 
+    TO_CHAR(min(transaction_date_time), 'YYYYMMDDHH24MISS') || '|' ||
+    TO_CHAR(max(transaction_date_time), 'YYYYMMDDHH24MISS') || '|' ||
+    '000001|' || TO_CHAR(sysdate, 'YYYYMMDDHH24MISS') || '|'
+    as record_header into RESULT
+    from (select
+      row_number() over (order by txn_date_time) record_number,
+      lpad(source_participant_id,5,'0') AS sp_code, 
+      lpad(device_location,12,'0') as location_id,
+      lpad(device_id,12,'0') as device_id,
+      decode(ud_subtype,13,'04',19,'14',10,'09',16,'19') as transaction_type_code,
+      txn_date_time+(7/24) as transaction_date_time,
+      --card_issuer_id,
+      card_serial_number,
+      '88' || lpad(CARD_SERIAL_NUMBER,9,'0') AS trader_trans_ident,
+      transaction_value,
+      'BSS-256' as product_type,
+      --settlement_date,
+      1 as cnt_txn
+      from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn
+                  from CUT.cut_pi_financial  aa
+                  where settlement_date=trunc(vsettle_date) --'11-JUN-2014'
+                  and ud_type=3 and ud_subtype in (13)
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+            --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date=trunc(vsettle_date) --'11-JUN-2014'
+                  and ud_type=3 and ud_subtype in (19)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+    order by txn_date_time)
+      ;
+    
+    RETURN RESULT;
+  END getcarrotcampaignheader2;
+
+   FUNCTION getcarrotcampaignheader3 (
+    vsettle_date DATE
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           VARCHAR2(65);
+  
+  BEGIN
+    
+   select 'TLG|' || 
+    LPAD (count(*), 8, '0') || '|' || 
+    TO_CHAR(min(transaction_date_time), 'YYYYMMDDHH24MISS') || '|' ||
+    TO_CHAR(max(transaction_date_time), 'YYYYMMDDHH24MISS') || '|' ||
+    '000001|' || TO_CHAR(sysdate, 'YYYYMMDDHH24MISS') || '|'
+    as record_header into RESULT
+    from (select
+      row_number() over (order by txn_date_time) record_number,
+      lpad(source_participant_id,5,'0') AS sp_code, 
+      lpad(device_location,12,'0') as location_id,
+      lpad(device_id,12,'0') as device_id,
+      decode(ud_subtype,13,'04',19,'14',10,'09',16,'19') as transaction_type_code,
+      txn_date_time+(7/24) as transaction_date_time,
+      --card_issuer_id,
+      card_serial_number,
+      '88' || lpad(CARD_SERIAL_NUMBER,9,'0') AS trader_trans_ident,
+      transaction_value,
+      'BSS-256' as product_type,
+      --settlement_date,
+      1 as cnt_txn
+      from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn
+                  from CUT.cut_pi_financial  aa
+                  where settlement_date=trunc(vsettle_date) --'11-JUN-2014'
+                  and ud_type=3 and ud_subtype in (10)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date=trunc(vsettle_date) --'11-JUN-2014'
+                  and ud_type=3 and ud_subtype in (16)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+    order by txn_date_time)
+      ;
+    
+    RETURN RESULT;
+  END getcarrotcampaignheader3;
+
+ FUNCTION getcarrotcampaignheader4 (
+    vsettle_date DATE
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           VARCHAR2(65);
+  
+  BEGIN
+    
+   select 'TLG|' || 
+    LPAD (count(*), 8, '0') || '|' || 
+    min(transaction_date_time) || '|' ||
+    max(transaction_date_time) || '|' ||
+    '000001|' || TO_CHAR(sysdate, 'YYYYMMDDHH24MISS') || '|'
+    as record_header into RESULT
+    from (
+	-- missing tlog
+	       select 
+            --row_number() over (order by loc_txn_date_time) record_number,
+            lpad(source_participant_id,5,'0') AS sp_code, 
+            lpad(device_location,12,'0') as location_id,
+            lpad(device_id,12,'0') as device_id,
+            --DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            case 
+            when ud_type = 3 and ud_subtype =3 then '09' -- Multiride Issue
+            when ud_type = 3 and ud_subtype =79 then '19' -- Multiride Issue Reverse
+            when ud_type = 3 and ud_subtype =10 then '09' -- Purse Add
+            when ud_type = 3 and ud_subtype =16 then '19' -- Purse Add Reverse
+            when ud_type = 3 and ud_subtype =39 then '09' -- Purse Add Recover
+            when ud_type = 3 and ud_subtype =91 then '04' -- Purse Use on Exit
+            when ud_type = 3 and ud_subtype =93 then '04' -- Multiride Use on Exit
+            when ud_type = 3 and ud_subtype =118 then '04' -- Purse Compensation Fare
+            when ud_type = 3 and ud_subtype =120 then '04' -- Multiride Compensation Fare
+            when ud_type = 3 and ud_subtype =13 then '04' -- Purse Use
+            when ud_type = 3 and ud_subtype =19 then '14' -- Purse Use Revert
+            end,
+            to_char(loc_txn_date_time,'YYYYMMDDHH24MISS') as transaction_date_time ,
+            '0' || lpad(CARD_SERIAL_NUMBER,11,'0') AS trader_trans_ident,
+            transaction_value ,
+            status,1 as cnt_txn
+            from (
+--
+      SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              device_id,
+              device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     ELSE 'BSS-256'  
+                END status
+            FROM cut_pi_exit CUT
+            --left join systemcd.syscd_product p on (CUT.DATA_VERSION=P.DATA_VERSION) AND (CUT.product_type=p.product_type) and (CUT.product_issuer_id=p.issuer_id)
+            WHERE ud_type           = 3
+            AND ud_subtype          in (91,93,118,120) --Purse use on exit,multiride use on exit, Purse Compensation, Multiride Compensation
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND settlement_date    =trunc(vsettle_date)
+            and source_participant_id = 1
+            and transaction_value <> 0
+            AND card_serial_number                IN
+              (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+             --   where card_serial_number = 580010262
+                )
+            UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              device_id,
+              device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     ELSE 'BSS-256'  
+                END status
+            FROM cut_pi_financial CUT
+            --left join syscd_product p on (CUT.DATA_VERSION=P.DATA_VERSION) AND (CUT.product_type=p.product_type) and (CUT.product_issuer_id=p.issuer_id)
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (3,79) --Multiride issue,reverse
+            AND source_participant_id = 1
+            AND cch_txn_approved    = 'Y'
+            AND iss_txn_reflection  = 'N'
+            AND settlement_date    =trunc(vsettle_date)
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+              --  where card_serial_number = 580010262 --
+                )
+            UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              device_id,
+              device_location,
+              source_participant_id,
+             'BSS-256' as status
+            FROM cut_pi_financial CUT
+            where ud_type           = 3
+            AND ud_subtype         IN (10,16,39) --Topup
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND settlement_date    =trunc(vsettle_date)
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+                UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              device_id,
+              device_location,
+              source_participant_id,
+              'BSS-256'  as status
+            FROM cut_pi_financial CUT
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (13,19) --retail usage
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND source_participant_id <> 91 -- Not give point at BSP usage eff on 12.12.2015 --
+            AND settlement_date    =trunc(vsettle_date)
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+                
+--
+)
+	-- missing tlog
+	
+	)
+      ;
+    
+    RETURN RESULT;
+  END getcarrotcampaignheader4;
+
+FUNCTION spstatusheader (
+    vsettle_date DATE
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           VARCHAR2(65);
+  
+  BEGIN
+    
+   select 'SP|' || 
+    LPAD (count(*), 8, '0') || '|' || 
+    TO_CHAR(sysdate, 'YYYYMMDDHH24MISS') || '|'
+    as record_header into RESULT
+    from (       select LPAD (row_number() over (order by PARTICIPANT_ID), 8, '0') ,
+                     LPAD (PARTICIPANT_ID,10,'0') ,
+                     name,
+                     short_name,
+                     CASE WHEN IS_CARROT_PARTICIPANT = 1 and participant_id not in (25,42,45,47,99,10023,10025,10043,10067,10097,10114,10116,10189,10190) THEN 'N'
+                              ELSE 'Y' END as USAGE,
+                     CASE WHEN IS_CARROT_PARTICIPANT = 1 THEN 'Y'
+                              WHEN PARTICIPANT_ID in (1,4,22,41,43) THEN 'Y'
+                     ELSE 'N' END as TOPUP
+                     from v_part1
+                     where PARTICIPANT_ID not in (2,10,11,12,14,32,44,88,89,90,91,44001,44002,4294967295)
+                     order by PARTICIPANT_ID)
+      ;
+    
+    RETURN RESULT;
+  END spstatusheader;
+  
+ FUNCTION getcarrotdevicesheader (
+    vsettle_date DATE
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT1          VARCHAR2(65);
+  
+  BEGIN
+    
+   select 'DEV|' || 
+    LPAD (count(*), 8, '0') || '|' || 
+    TO_CHAR(sysdate, 'YYYYMMDDHH24MISS') || '|'
+    as record_header into RESULT1
+    from (SELECT LPAD (row_number() over (order by PARTICIPANT_ID,DEVICE_ID), 8, '0'),PARTICIPANT_ID, location_id, LOCATION_DESC, DEVICE_ID, DEVICE_TYPE
+      FROM (
+      SELECT DISTINCT
+      LPAD (first_value(PARTICIPANT_ID) over (partition BY DEVICE_ID order by device_status."TIME" DESC),10,'0') PARTICIPANT_ID,
+      LPAD (first_value(LOCATION) over (partition BY DEVICE_ID order by device_status."TIME" DESC),12,'0') location_id,
+      BSS.CDA.getLocationDesc(first_value(PARTICIPANT_ID) over (partition BY DEVICE_ID order by device_status."TIME" DESC),
+      BSS.CDA.to_LocationID(first_value(LOCATION) over (partition BY DEVICE_ID order by device_status."TIME" DESC))) LOCATION_DESC,
+      LPAD (first_value(DEVICE_ID) over (partition BY DEVICE_ID order by device_status."TIME" DESC), 12, '0') DEVICE_ID,
+      '01' DEVICE_TYPE
+      FROM DEVICE.device_status
+      WHERE DEVICE.device_status.status = 5)
+      WHERE LOCATION_DESC not like '{%'
+      ORDER BY PARTICIPANT_ID,DEVICE_ID)
+      ;
+    
+    RETURN RESULT1;
+  END getcarrotdevicesheader;
+
+   FUNCTION getequipmentnofromdeviceid (vdeviceid IN NUMBER)
+      RETURN VARCHAR2
+   AS
+      RESULT   device_status.equipment_no%TYPE;
+   BEGIN
+      SELECT DISTINCT equipment_no
+                 INTO RESULT
+                 FROM device.dv_device_status
+                --WHERE (active = 'Y' or status <> 6)
+                WHERE (active = 'Y' or status <> 6)
+                and device_id = vdeviceid
+                and last_used_time = (select max(last_used_time) from device.dv_device_status 
+                                      WHERE (active = 'Y' or status <> 6)
+                                      and device_id = vdeviceid);               
+                --and PARTICIPANT_ID = vspid;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN NULL;
+  END getequipmentnofromdeviceid;
+  
+  FUNCTION getequipnofromdeviceidandspid (vdeviceid IN NUMBER, vparticipantid IN NUMBER)
+  RETURN VARCHAR2
+  AS
+      RESULT   device_status.equipment_no%TYPE;
+  BEGIN
+      SELECT DISTINCT equipment_no
+                 INTO RESULT
+                 FROM device.dv_device_status
+                --WHERE (active = 'Y' or status <> 6)
+                WHERE active = 'Y' and status <> 6
+                and device_id = vdeviceid
+                and participant_id = vparticipantid
+                and last_used_time = (select max(last_used_time) from device.dv_device_status 
+                                      WHERE active = 'Y' and status <> 6
+                                      and device_id = vdeviceid);               
+                --and PARTICIPANT_ID = vspid;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN NULL;
+  END getequipnofromdeviceidandspid;
+  
+   FUNCTION getbsslnbigcfromfunbsslocid (
+   vbsslocidbigc IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+    bss_loc_name1 varchar2(100);
+   
+   BEGIN
+   
+   SELECT location_name as bss_loc_name into bss_loc_name1
+    FROM syscd_location
+    where data_version = (select max(data_version) from syscd_location)
+    and participant_id = 45
+    and id = vbsslocidbigc
+    ;
+
+    RETURN bss_loc_name1;
+
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN NULL;
+     
+   END getbsslnbigcfromfunbsslocid;
+   
+   FUNCTION getlocationnamefromdevid (
+   vparticipantid IN NUMBER,
+   vdeviceid IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           syscd_location.location_name%TYPE;
+   vlocationcode    syscd_location.location_code%TYPE;
+   
+  BEGIN
+    /* TODO implementation required */
+    
+    SELECT BITAND (LOCATION, 16777215)
+                 INTO vlocationcode
+                 FROM device.dv_device_status
+                WHERE device_id = vdeviceid
+                AND participant_id = vparticipantid;
+
+      SELECT location_name
+        INTO RESULT
+        FROM v_location1
+       WHERE participant_id = vparticipantid AND location_code = vlocationcode
+                                                                              --AND location_type = 9                                     -- Station.
+      ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{' || TO_CHAR (vdeviceid) || '}';
+ 
+  END getlocationnamefromdevid;
+  
+  FUNCTION getlocationnamefromdevtypeid (
+   vloctype IN NUMBER,
+   vparticipantid IN NUMBER,
+   vlocid IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           syscd_location.location_name%TYPE;
+   
+  BEGIN
+    /* TODO implementation required */
+    
+    select location_name into RESULT
+    from systemcd.syscd_location 
+    where data_version = (select max(data_version) from systemcd.syscd_version)
+    and location_type=vloctype
+    and participant_id=vparticipantid
+    and id=vlocid
+    ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{' || TO_CHAR (vlocid) || '}';
+
+  END getlocationnamefromdevtypeid;
+  
+  FUNCTION getproductsaledesc (
+   vcardid IN NUMBER,
+   vcsc_issuer_id IN NUMBER,
+   vcsc_lifecycle_count IN NUMBER,
+   vcsc_type IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           v_product_sales_type1.product_type_description%TYPE;
+   
+  BEGIN
+      
+      select b.product_type_description into RESULT
+      from 
+      (select csc_issuer_id, csc_serial_number, csc_lifecycle_count, csc_type, card_layout_version, card_batch_number from card.card_account 
+      where csc_serial_number=vcardid
+      and csc_issuer_id = vcsc_issuer_id
+      and csc_lifecycle_count = vcsc_lifecycle_count
+      and csc_type = vcsc_type
+      ) a,
+      (select * from v_product_sales_type1 where lang_iso='en') b
+      where a.card_batch_number = b.product_type_id
+      ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{No Product Sale}';
+   
+   END getproductsaledesc;
+   
+   FUNCTION getLocationDesc (vPartID IN NUMBER,vLocationID IN NUMBER,vDataVersion IN NUMBER DEFAULT NULL) RETURN VARCHAR2 AS
+    vRESULT VARCHAR2(100);
+  BEGIN
+  IF vDataVersion IS NULL
+  THEN
+    SELECT location_name 
+    INTO vRESULT
+    FROM syscd_location 
+    WHERE data_version=(SELECT MAX(DATA_VERSION)FROM SYSTEMCD.SYSCD_VERSION) AND participant_id=vPartID AND location_code=vLocationID
+          AND location_type<>17 AND location_type<>20;
+  ELSE
+    SELECT location_name 
+    INTO vRESULT
+    FROM syscd_location 
+    WHERE data_version=vDataVersion AND participant_id=vPartID AND location_code=vLocationID;
+  END IF;
+  RETURN vRESULT;
+  EXCEPTION
+    WHEN OTHERS
+    THEN
+      RETURN '{' || vPartID || ',' || vLocationID || '}';
+  END getLocationDesc;
+  
+  FUNCTION getlocationnamefromdevloc (
+   vparticipantid IN NUMBER,
+   vdevicelocation IN NUMBER,
+   vdataversion IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           syscd_location.location_name%TYPE;
+   vpartid          syscd_location.participant_id%TYPE;
+   vlocationcode    syscd_location.location_code%TYPE;
+   
+  BEGIN
+    /* TODO implementation required */
+    
+    SELECT to_number(substr(to_char(vdevicelocation,'XXXXXXXX'),-6,6),'XXXXXXXX') as location_id_trf 
+    INTO vlocationcode
+    FROM DUAL;
+
+    
+       SELECT location_name
+        INTO RESULT
+        FROM SYSTEMCD.SYSCD_LOCATION
+       WHERE participant_id = vparticipantid 
+       AND location_code = vlocationcode
+       AND data_version = vdataversion
+       AND location_type = 15 --Retail
+      ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{' || TO_CHAR (vlocationcode) || ',' || TO_CHAR (vdevicelocation) || '}';
+ 
+  END getlocationnamefromdevloc;
+
+     FUNCTION getproductsaleid (
+   vcardid IN NUMBER,
+   vcsc_issuer_id IN NUMBER,
+   vcsc_lifecycle_count IN NUMBER,
+   vcsc_type IN NUMBER
+   )
+   RETURN VARCHAR2 AS
+   
+   RESULT           v_product_sales_type1.product_type_description%TYPE;
+   
+  BEGIN
+      
+      select b.product_type_ID into RESULT
+      from 
+      (select csc_issuer_id, csc_serial_number, csc_lifecycle_count, csc_type, card_layout_version, card_batch_number from card.card_account 
+      where csc_serial_number=vcardid
+      and csc_issuer_id = vcsc_issuer_id
+      and csc_lifecycle_count = vcsc_lifecycle_count
+      and csc_type = vcsc_type
+      ) a,
+      (select * from v_product_sales_type1 where lang_iso='en') b
+      where a.card_batch_number = b.product_type_id
+      ;
+
+      RETURN RESULT;
+   EXCEPTION
+      WHEN OTHERS
+      THEN
+         RETURN '{No Product Sale}';
+   
+   END getproductsaleid;
+  
+   
+
+END PKG_FUN;
