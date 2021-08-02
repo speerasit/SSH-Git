@@ -1,0 +1,1948 @@
+create or replace PACKAGE BODY X_CRR_TEMP AS
+
+   v_sysdatetime VARCHAR2(14) := to_char(sysdate, 'YYYYMMDDHH24MISS');
+  v_sysdate VARCHAR2(8) := to_char(sysdate, 'YYYYMMDD');
+  PROCEDURE CARROT_CAMPAIGN1 AS
+  
+ BEGIN
+  
+ 
+--TLOG2
+
+declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_device_location varchar2(20);
+    v_device_id varchar2(20);
+    v_ud_type varchar2(5);
+    v_txn_date_time varchar2(20);
+    v_card_serial_number varchar2(15);
+    v_transaction_value varchar2(10); 
+    v_purse_remaining_value varchar2(10); 
+    v_passenger_type varchar2(10);
+    v_text varchar2(10);
+    type ref_cursor is REF CURSOR;
+  
+      detail_cur ref_cursor;
+
+    begin  
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_PROMO_' || v_sysdatetime  || '.txt' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      UTL_FILE.FFLUSH(fHandle);
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+
+           select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') ,
+            LPAD (source_participant_id,10,'0') ,
+            LPAD (device_location,12,'0') ,
+            LPAD (device_id,12,'0') ,
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') ,
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0')  ,
+            LPAD (transaction_value,8,'0') ,
+            'BSS-256' ,
+            LPAD (passenger_type,8,'0') ,
+            LPAD (purse_remaining_value,8,'0') 
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value
+            --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+            ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (13)
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+            --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (19)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+            order by txn_date_time;
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_device_location,v_device_id,v_ud_type,v_txn_date_time,v_card_serial_number,v_transaction_value,v_text,v_passenger_type,v_purse_remaining_value;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_row_number||'|'||v_sp_id||'|'||v_device_location||'|'||v_device_id||'|'||v_ud_type||'|'||v_txn_date_time||'|'||v_card_serial_number||'|'||v_transaction_value||'|'||v_text||'|'||v_passenger_type||'|'||v_purse_remaining_value||'|'|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+
+    
+    declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_device_location varchar2(20);
+    v_device_id varchar2(20);
+    v_ud_type varchar2(5);
+    v_txn_date_time varchar2(20);
+    v_card_serial_number varchar2(15);
+    v_transaction_value varchar2(10); 
+    v_purse_remaining_value varchar2(10); 
+    v_passenger_type varchar2(10);
+    v_text varchar2(10);
+    v_file_name varchar2(50) := 'RB_TL_9990000008_' || v_sysdatetime  || '.tlg' ;
+    
+    type ref_cursor is REF CURSOR;
+    --CRLF CONSTANT CHAR(2) := CHR(13)||CHR(10);
+  
+      detail_cur ref_cursor;
+    begin  
+      -- Add summary tlog 20180618
+            insert into BSS_REPORTS.TLOG_SUMMARY (FILE_NAME,TXN_TYPE,TXN_VOLUME,TXN_VALUE,TIME_LOADED)
+ --values 
+ (
+ select 
+        v_file_name as file_name,
+        TXN_TYPE,
+        count(*) as TXN_VOLUME,
+        sum(transaction_value/100) as TXN_VALUE,
+        sysdate as TIME_LOADED
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,DECODE(ud_subtype,13,'PURSE USE',19,'PURSE USE REVERSE',10,'PURSE ADD',16,'PURSE ADD REVERSE') as TXN_TYPE
+                  from CUT.cut_pi_financial  aa
+                  where settlement_date= v_date
+                  and ud_type=3 and ud_subtype in (13)
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and service_participant_id in (4,41,42,43,45,46,47,75,76,77,90,501,10025,10043,10067,10097)
+            --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn,DECODE(ud_subtype,13,'PURSE USE',19,'PURSE USE REVERSE',10,'PURSE ADD',16,'PURSE ADD REVERSE') as TXN_TYPE
+                  from CUT.cut_pi_financial rev
+                  where settlement_date= v_date
+                  and ud_type=3 and ud_subtype in (19)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and service_participant_id in (4,41,42,43,45,46,47,75,76,77,90,501,10025,10043,10067,10097)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1)) aa1
+            group by v_file_name,TXN_TYPE,to_date(sysdate)
+            );
+commit;
+
+      -- End Add summary tlog 20180618
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_TL_9990000008_' || v_sysdatetime  || '.tlg' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      --UTL_FILE.FFLUSH(fHandle);
+      
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+
+           select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') ,
+            LPAD (source_participant_id,10,'0') ,
+            LPAD (device_location,12,'0') ,
+            LPAD (device_id,12,'0') ,
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') ,
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0')  ,
+            LPAD (transaction_value,8,'0') ,
+            'BSS-256' 
+            ,LPAD (passenger_type,8,'0') ,
+            LPAD (purse_remaining_value,8,'0') 
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value
+            --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+            ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (13)
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+            --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (19)
+                 -- and card_serial_number =1231618
+                  and service_participant_id in (11,12,41,43,45,62,300,301,98,64,305,306)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+            order by txn_date_time;
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_device_location,v_device_id,v_ud_type,v_txn_date_time,v_card_serial_number,v_transaction_value,v_text,v_passenger_type,v_purse_remaining_value;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_row_number||'|'||v_sp_id||'|999000000001|000077391091|'||v_ud_type||'|'||v_txn_date_time||'|'||v_card_serial_number||'|'||v_transaction_value||'|'||v_text||'|'||v_passenger_type||'|'||v_purse_remaining_value||'|'|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+
+-- TLOG3
+
+declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_device_location varchar2(20);
+    v_device_id varchar2(20);
+    v_ud_type varchar2(5);
+    v_txn_date_time varchar2(20);
+    v_card_serial_number varchar2(15);
+    v_transaction_value varchar2(10); 
+    v_purse_remaining_value  varchar2(10); 
+    v_passenger_type varchar2(10);
+    v_text varchar2(10);
+    type ref_cursor is REF CURSOR;
+  
+      detail_cur ref_cursor;
+
+    begin  
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_TOPUP_PROMO_' || v_sysdatetime  || '.txt' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      UTL_FILE.FFLUSH(fHandle);
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+
+           select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') ,
+            LPAD (source_participant_id,10,'0') ,
+            LPAD (device_location,12,'0') ,
+            LPAD (device_id,12,'0') ,
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') ,
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0')  ,
+            LPAD (transaction_value,8,'0') ,
+            'BSS-256' 
+            ,LPAD (passenger_type,8,'0') ,
+            LPAD (purse_remaining_value,8,'0')
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value
+             --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+              ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (10)
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744,559,10771,688,689,690,10688,10689,10690,10688,10689,10690,560,561,562,563,564,565,566,567,568,569,570,571,10574)
+                  --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (16)
+                 -- and card_serial_number =1231618
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744,559,10771,688,689,690,10688,10689,10690,10688,10689,10690,560,561,562,563,564,565,566,567,568,569,570,571,10574)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+            order by txn_date_time;
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_device_location,v_device_id,v_ud_type,v_txn_date_time,v_card_serial_number,v_transaction_value,v_text,v_passenger_type,v_purse_remaining_value;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_row_number||'|'||v_sp_id||'|'||v_device_location||'|'||v_device_id||'|'||v_ud_type||'|'||v_txn_date_time||'|'||v_card_serial_number||'|'||v_transaction_value||'|'||v_text||'|'||v_passenger_type||'|'||v_purse_remaining_value||'|'|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+
+    declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_device_location varchar2(20);
+    v_device_id varchar2(20);
+    v_ud_type varchar2(5);
+    v_txn_date_time varchar2(20);
+    v_card_serial_number varchar2(15);
+    v_transaction_value varchar2(10); 
+    v_purse_remaining_value  varchar2(10);
+    v_passenger_type varchar2(10);
+    v_text varchar2(10);
+    v_file_name varchar2(50) := 'RB_TL_9990000009_' || v_sysdatetime  || '.tlg' ;
+    
+    type ref_cursor is REF CURSOR;
+    --CRLF CONSTANT CHAR(2) := CHR(13)||CHR(10);
+  
+      detail_cur ref_cursor;
+    begin  
+      -- Add summary tlog 20180618
+            insert into BSS_REPORTS.TLOG_SUMMARY (FILE_NAME,TXN_TYPE,TXN_VOLUME,TXN_VALUE,TIME_LOADED)
+ --values 
+ (
+ select 
+        v_file_name as file_name,
+        TXN_TYPE,
+        count(*) as TXN_VOLUME,
+        sum(transaction_value/100) as TXN_VALUE,
+        sysdate as TIME_LOADED
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,DECODE(ud_subtype,13,'PURSE USE',19,'PURSE USE REVERSE',10,'PURSE ADD',16,'PURSE ADD REVERSE') as TXN_TYPE
+                  from CUT.cut_pi_financial  aa
+                  where settlement_date= v_date
+                  and ud_type=3 and ud_subtype in (10)
+                  --and service_participant_id in (11,12,41,43,45)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn,DECODE(ud_subtype,13,'PURSE USE',19,'PURSE USE REVERSE',10,'PURSE ADD',16,'PURSE ADD REVERSE') as TXN_TYPE
+                  from CUT.cut_pi_financial rev
+                  where settlement_date= v_date
+                  and ud_type=3 and ud_subtype in (16)
+                 -- and card_serial_number =1231618
+                  --and service_participant_id in (11,12,41,43,45)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+            group by v_file_name,TXN_TYPE,to_date(sysdate)
+            );
+commit;
+
+      -- End Add summary tlog 20180618
+    
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_TL_9990000009_' || v_sysdatetime  || '.tlg' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      --UTL_FILE.FFLUSH(fHandle);
+      
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+
+           select 
+            LPAD (row_number() over (order by txn_date_time), 8, '0') ,
+            LPAD (source_participant_id,10,'0') ,
+            LPAD (device_location,12,'0') ,
+            LPAD (device_id,12,'0') ,
+            DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            TO_CHAR(txn_date_time+(7/24),'YYYYMMDDHH24MISS') ,
+            '088' || lpad(CARD_SERIAL_NUMBER,9,'0')  ,
+            LPAD (transaction_value,8,'0') ,
+            'BSS-256' 
+             ,LPAD (passenger_type,8,'0') ,
+            LPAD (purse_remaining_value,8,'0')
+                  from (select 
+          source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ud_subtype
+            ,txn_date_time,ptsn,purse_remaining_value
+            --,reports.bkk_int_fun.getpassengertype(bb.passenger_Type,aa.data_version,'EN') AS CARD_TYPE
+              ,bb.passenger_Type
+                  from CUT.cut_pi_financial  aa
+                  left join application_account bb on aa.card_serial_number = bb.csc_serial_number and aa.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+                  --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (10)
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --      and card_serial_number =1231618
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+      and not exists (
+            select 
+            source_participant_id ,
+           device_location,
+           device_id,
+           CARD_SERIAL_NUMBER ,
+            transaction_value,ptsn
+                  from CUT.cut_pi_financial rev
+                  where settlement_date=v_date
+                  and ud_type=3 and ud_subtype in (16)
+                 -- and card_serial_number =1231618
+                  --and ud_type=3 and ud_subtype in (19)
+                  and service_participant_id in (4,21,22,24,25,26,27,41,42,43,45,46,47,75,76,77,99,102,501,502,503,504,505,506,514,515,516,517,518,520,521,522,523,10023,10025,10043,10067,10097,10114,10116,10189,10190,10200,10203,10205,10208,
+                  10209,10214,50,524,10223,10225,10244,10247,10249,300,301,10284,527,525,526,528,529,531,304,98,305,10317,52,10327,10367,10366,533,534,10380,306,10411,535,536,537,539,540,541,542,543,544,545,546,10416,547,548,549,550,
+                  10459,10484,307,10709,552,553,556,558,10733,10738,10740,10743,10744)
+                  --and transaction_value > 100
+                  and (txn_date_time+(7/24) <= ('02-JAN-1970') or txn_date_time+(7/24) >= sysdate-180)
+                  and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+                  --and source_participant_id not in (10026,10006,10038,10001,42)
+                  and card_serial_number in (select card_serial_number from carrot.member where is_active='Y')
+                   and rev.source_participant_id = aa.source_participant_id
+                   and rev.device_location = aa.device_location
+                   and rev.device_id = aa.device_id
+                   and rev.CARD_SERIAL_NUMBER = aa.CARD_SERIAL_NUMBER
+                   and rev.transaction_value = aa.transaction_value
+                   and rev.ptsn = aa.ptsn+1))
+            order by txn_date_time;
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_device_location,v_device_id,v_ud_type,v_txn_date_time,v_card_serial_number,v_transaction_value,v_text,v_passenger_type,v_purse_remaining_value;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_row_number||'|'||v_sp_id||'|999000000001|000077391091|'||v_ud_type||'|'||v_txn_date_time||'|'||v_card_serial_number||'|'||v_transaction_value||'|'||v_text||'|'||v_passenger_type||'|'||v_purse_remaining_value||'|'|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+
+-- Start Missing TLOG
+    declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_device_location varchar2(20);
+    v_device_id varchar2(20);
+    v_ud_type varchar2(5);
+    v_txn_date_time varchar2(20);
+    v_card_serial_number varchar2(15);
+    v_transaction_value varchar2(10); 
+    v_purse_remaining_value  varchar2(10);
+    v_passenger_type varchar2(10);
+    v_text varchar2(10);
+   -- v_passenger_type varchar2(10);
+    v_file_name varchar2(50) := 'RB_TL_9990000007_' || v_sysdatetime  || '.tlg' ;
+    type ref_cursor is REF CURSOR;
+    
+    --CRLF CONSTANT CHAR(2) := CHR(13)||CHR(10);
+  
+      detail_cur ref_cursor;
+    begin 
+    -- Add summary tlog 20180618
+            insert into BSS_REPORTS.TLOG_SUMMARY (FILE_NAME,TXN_TYPE,TXN_VOLUME,TXN_VALUE,TIME_LOADED)
+ --values 
+ (
+select
+        v_file_name as file_name,
+        TXN_TYPE1,
+        count(*) as TXN_VOLUME,
+        sum(transaction_value/100) as TXN_VALUE,
+        sysdate as TIME_LOADED
+                  from(
+--
+      SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              to_char(device_id) as device_id,
+              to_char(device_location) as device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 and cut.product_type <> 256 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     WHEN source_participant_id = 1 and cut.product_type = 256 THEN 'BSS-256'
+                     ELSE 'BSS-256'  
+                END status,DECODE(ud_subtype,13,'PURSE USE',
+        19,'PURSE USE REVERSE',
+        10,'PURSE ADD',
+        16,'PURSE ADD REVERSE',
+        39,'PURSE ADD RECOVER',
+        3,'MULTIRIDE ISSUE',
+        79,'MULTIRIDE ISSUE REVERSE',
+        91,'PURSE USE ON EXIT',
+        93,'MULTIRIDE USE ON EXIT',
+        118,'PURSE COMPENSATION FARE',
+        120,'MULTIRIDE COMPENSATION FARE') as TXN_TYPE1
+            FROM cut_pi_exit CUT
+            --left join syscd_product p on (CUT.DATA_VERSION=P.DATA_VERSION) AND (CUT.product_type=p.product_type) and (CUT.product_issuer_id=p.issuer_id)
+            WHERE ud_type           = 3
+            AND ud_subtype          in (91,93,118,120) --Purse use on exit,multiride use on exit, Purse Compensation, Multiride Compensation
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND settlement_date    = v_date
+            and source_participant_id = 1
+            and transaction_value <> 0
+            AND card_serial_number                IN
+              (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+             --   where card_serial_number = 580010262
+                )
+            UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              to_char(device_id) as device_id,
+              to_char(device_location) as device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 and cut.product_type <> 256 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     WHEN source_participant_id = 1 and cut.product_type = 256 THEN 'BSS-256'
+                     ELSE 'BSS-256'  
+                END status,DECODE(ud_subtype,13,'PURSE USE',
+        19,'PURSE USE REVERSE',
+        10,'PURSE ADD',
+        16,'PURSE ADD REVERSE',
+        39,'PURSE ADD RECOVER',
+        3,'MULTIRIDE ISSUE',
+        79,'MULTIRIDE ISSUE REVERSE',
+        91,'PURSE USE ON EXIT',
+        93,'MULTIRIDE USE ON EXIT',
+        118,'PURSE COMPENSATION FARE',
+        120,'MULTIRIDE COMPENSATION FARE') as TXN_TYPE1
+            FROM cut_pi_financial CUT
+            --left join syscd_product p on (CUT.DATA_VERSION=P.DATA_VERSION) AND (CUT.product_type=p.product_type) and (CUT.product_issuer_id=p.issuer_id)
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (3,79) --Multiride issue,reverse
+            AND source_participant_id = 1
+            AND cch_txn_approved    = 'Y'
+            AND iss_txn_reflection  = 'N'
+            AND settlement_date    = v_date
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+              --  where card_serial_number = 580010262 --
+                )
+            UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              '999000000001' as device_id,
+              '000077391091' as device_location,
+              source_participant_id,
+             'BSS-256' as status,DECODE(ud_subtype,13,'PURSE USE',
+        19,'PURSE USE REVERSE',
+        10,'PURSE ADD',
+        16,'PURSE ADD REVERSE',
+        39,'PURSE ADD RECOVER',
+        3,'MULTIRIDE ISSUE',
+        79,'MULTIRIDE ISSUE REVERSE',
+        91,'PURSE USE ON EXIT',
+        93,'MULTIRIDE USE ON EXIT',
+        118,'PURSE COMPENSATION FARE',
+        120,'MULTIRIDE COMPENSATION FARE') as TXN_TYPE1
+            FROM cut_pi_financial CUT
+            where ud_type           = 3
+            AND ud_subtype         IN (10,16,39) --Topup
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND settlement_date    =v_date
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+                UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              '999000000001' as device_id,
+              '000077391091' as device_location,
+              source_participant_id,
+              'BSS-256'  as status,DECODE(ud_subtype,13,'PURSE USE',
+        19,'PURSE USE REVERSE',
+        10,'PURSE ADD',
+        16,'PURSE ADD REVERSE',
+        39,'PURSE ADD RECOVER',
+        3,'MULTIRIDE ISSUE',
+        79,'MULTIRIDE ISSUE REVERSE',
+        91,'PURSE USE ON EXIT',
+        93,'MULTIRIDE USE ON EXIT',
+        118,'PURSE COMPENSATION FARE',
+        120,'MULTIRIDE COMPENSATION FARE') as TXN_TYPE1
+            FROM cut_pi_financial CUT
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (13,19) --retail usage
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND source_participant_id <> 91 -- Not give point at BSP usage eff on 12.12.2015 --
+            AND settlement_date    = v_date
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+                
+--
+)
+        group by v_file_name,
+        TXN_TYPE1,to_date(sysdate)
+);
+commit;
+
+      -- End Add summary tlog 20180618
+    
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_TL_9990000007_' || v_sysdatetime  || '.tlg' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader3(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.getcarrotcampaignheader4(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      --UTL_FILE.FFLUSH(fHandle);
+      
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+
+  select 
+            LPAD (row_number() over (order by loc_txn_date_time), 8, '0') ,
+            LPAD (source_participant_id,10,'0') ,
+            LPAD (device_location,12,'0') ,
+            LPAD (to_char(device_id),12,'0') ,
+            --DECODE(ud_subtype,13,'04',19,'14',10,'09',16,'19') ,
+            case 
+            when ud_type = 3 and ud_subtype =3 then '09' -- Multiride Issue
+            when ud_type = 3 and ud_subtype =79 then '19' -- Multiride Issue Reverse
+            when ud_type = 3 and ud_subtype =10 then '09' -- Purse Add
+            when ud_type = 3 and ud_subtype =16 then '19' -- Purse Add Reverse
+            when ud_type = 3 and ud_subtype =39 then '09' -- Purse Add Recover
+            when ud_type = 3 and ud_subtype =91 then '04' -- Purse Use on Exit
+            when ud_type = 3 and ud_subtype =93 then '04' -- Multiride Use on Exit
+            when ud_type = 3 and ud_subtype =118 then '04' -- Purse Compensation Fare
+            when ud_type = 3 and ud_subtype =120 then '04' -- Multiride Compensation Fare
+            when ud_type = 3 and ud_subtype =13 then '04' -- Purse Use
+            when ud_type = 3 and ud_subtype =19 then '14' -- Purse Use Revert
+            end,
+            to_char(loc_txn_date_time,'YYYYMMDDHH24MISS') ,
+            '0' || lpad(CARD_SERIAL_NUMBER,11,'0')  ,
+            LPAD (transaction_value,8,'0') ,
+            status
+            ,LPAD (passenger_type,8,'0') ,
+            LPAD (purse_remaining_value,8,'0')
+            from (
+--
+      SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              to_char(device_id) as device_id,
+              to_char(device_location) as device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 and cut.product_type <> 256 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     WHEN source_participant_id = 1 and cut.product_type = 256 THEN 'BSS-256'
+                     ELSE 'BSS-256'  
+                END status
+                ,purse_remaining_value
+                ,bb.passenger_Type
+            FROM cut_pi_exit CUT
+            left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            WHERE ud_type           = 3
+            AND ud_subtype          in (91,93,118,120) --Purse use on exit,multiride use on exit, Purse Compensation, Multiride Compensation
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND settlement_date    = v_date
+            and source_participant_id = 1
+            and transaction_value <> 0
+            AND card_serial_number                IN
+              (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+             --   where card_serial_number = 580010262
+                )
+                
+         
+ UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              to_char(device_id) as device_id,
+              to_char(device_location) as device_location,
+              source_participant_id,
+              CASE 
+                     WHEN source_participant_id = 1 and cut.product_type <> 256 THEN 'BTS-'|| lpad(cut.product_type,3,'0')
+                     WHEN source_participant_id = 1 and cut.product_type = 256 THEN 'BSS-256'
+                     ELSE 'BSS-256'  
+                END status
+                ,purse_remaining_value
+                ,bb.passenger_Type
+            FROM cut_pi_financial CUT
+            left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            
+            --left join syscd_product p on (CUT.DATA_VERSION=P.DATA_VERSION) AND (CUT.product_type=p.product_type) and (CUT.product_issuer_id=p.issuer_id)
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (3,79) --Multiride issue,reverse
+            AND source_participant_id = 1
+            AND cch_txn_approved    = 'Y'
+            AND iss_txn_reflection  = 'N'
+            AND settlement_date    = v_date
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                and acclst.state       in (2,3,4,9)
+                AND acclst.action      IN (2,3) --block Top up and ATU
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+              --  where card_serial_number = 580010262 --
+                )
+  UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              '999000000001' as device_id,
+              '000077391091' as device_location,
+              source_participant_id,
+             'BSS-256' as status
+             ,purse_remaining_value
+                ,bb.passenger_Type
+            FROM cut_pi_financial CUT
+           left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+           
+            where ud_type           = 3
+            AND ud_subtype         IN (10,16,39) --Topup
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND settlement_date    = v_date
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+ UNION ALL
+            SELECT '88'
+              || lpad(CARD_SERIAL_NUMBER,9,0) card_serial_number,UD_TYPE,UD_SUBTYPE,
+              REPORTS.BKK_INT_FUN.GETTRANSACTIONDESC (UD_TYPE,UD_SUBTYPE)                                                               AS txn_type,
+              transaction_value                                                                                                         AS transaction_value,
+              to_date(RP_STD.TOLOCALTIME(TXN_DATE_TIME),'DD-MON-YY HH24:MI:SS')                                                         AS loc_txn_date_time,
+              BSS.CDA.getLocationDesc(source_participant_id,to_number(SUBSTR(TO_CHAR(device_location,'XXXXXXXX'),-6,6),'XXXXXXXX'),NULL)AS location_name,
+              '999000000001' as device_id,
+              '000077391091' as device_location,
+              source_participant_id,
+              'BSS-256'  as status
+              ,purse_remaining_value
+                ,bb.passenger_Type
+            FROM cut_pi_financial CUT
+            left join application_account bb on cut.card_serial_number = bb.csc_serial_number and cut.CARD_LIFE_CYCLE_COUNT = bb.csc_lifecycle_count
+            --  left join syscd_passenger_type p on p.passenger_type = bb.passenger_type and p.data_version = aa.data_version
+            
+            WHERE ud_type           = 3
+            AND ud_subtype         IN (13,19) --retail usage
+            AND cch_txn_approved    = 'Y'
+            and iss_txn_reflection  = 'N'
+            AND source_participant_id <> 91 -- Not give point at BSP usage eff on 12.12.2015 --
+            AND settlement_date    = v_date
+            AND card_serial_number                IN
+               (SELECT card_serial_number
+              FROM
+                ((SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity)
+                FROM actionlist.card_actionlist ca,
+                  actionlist.actionlist acclst
+                WHERE acclst.entry_id   = ca.entry_id
+                AND acclst.state       IN (2,3,4,9)
+                AND acclst.action      IN (2,3)
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                )union all 
+                --Add block all and state delete condition eff on 12.12.2015 --
+                (SELECT card_serial_number,
+                  acclst.state,
+                  acclst.action,
+                  MAX(last_activity) 
+                from actionlist.card_actionlist ca,
+                actionlist.actionlist acclst
+                where acclst.entry_id   = ca.entry_id
+                and acclst.state     = 9 --deleted
+                AND acclst.action    = 1 --block all
+                AND card_serial_number IN
+                  (SELECT card_serial_number FROM carrot.member WHERE is_active = 'N'
+                  )
+                GROUP BY card_serial_number,
+                  acclst.state,
+                  acclst.action
+                ))
+               -- where card_serial_number = 580010262 
+                )
+                
+--
+)
+order by loc_txn_date_time
+;
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_device_location,v_device_id,v_ud_type,v_txn_date_time,v_card_serial_number,v_transaction_value,v_text,v_passenger_type,v_purse_remaining_value;
+            
+          Exit When detail_cur%NOTFOUND;
+                   
+          v_log := v_row_number||'|'||v_sp_id||'|'||v_device_location||'|'||v_device_id||'|'||v_ud_type||'|'||v_txn_date_time||'|'||v_card_serial_number||'|'||v_transaction_value||'|'||v_text||'|'||v_passenger_type||'|'||v_purse_remaining_value||'|'|| CHR(13);           
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+-- End Missing TLOG
+
+--RB_SP_STATUS
+declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_sp_name varchar2(50);
+    v_sp_shortname varchar2(5);
+    v_usage varchar2(5);
+    v_topup varchar2(5);
+    type ref_cursor is REF CURSOR;
+  
+      detail_cur ref_cursor;
+
+    begin  
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_SP_STATUS_' || v_sysdatetime  || '.sp' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader2(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.spstatusheader(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      UTL_FILE.FFLUSH(fHandle);
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+
+  select LPAD (row_number() over (order by PARTICIPANT_ID), 8, '0') ,
+                     LPAD (PARTICIPANT_ID,10,'0') ,
+                     name,
+                     TRIM(short_name),
+--                     CASE WHEN PARTICIPANT_ID in (46,75,76,77,501,502,503,504,505,506) THEN 'N'
+--                              ELSE 'Y' END as USAGE,
+                     CASE WHEN IS_CARROT_PARTICIPANT = 1 and participant_id not in (25,42,45,47,50,99,104,105,10023,10025,10043,10067,10097,10114,10116,10189,10190,10203,10205,10208,10209,10223,10225,109,10247,10249,110,300,301,10244,10284,
+                     304,98,10317,52,10327,10367,10366,10380,306,10411,10416,10435,10459,10484,10709,10733,10738,10740,10743,10744) THEN 'N'
+                              ELSE 'Y' END as USAGE,
+                     CASE WHEN IS_CARROT_PARTICIPANT = 1 THEN 'Y'
+                              WHEN PARTICIPANT_ID in (1,4,22,41,43) THEN 'Y'
+                     ELSE 'N' END as TOPUP
+           from v_part1
+           where PARTICIPANT_ID not in (2,10,11,12,14,32,44,88,89,90,91,44001,44002,4294967295)
+           order by PARTICIPANT_ID;
+
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_sp_name,v_sp_shortname,v_usage,v_topup;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_row_number||'|'||v_sp_id||'|'||v_sp_name||'|'||v_sp_shortname||'|'||v_usage||'|'||v_topup||'|'|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+  
+   declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_row_number  varchar2(20);
+    v_sp_id varchar2(10);
+    v_location_id varchar2(12);
+    v_location_desc varchar2(100);
+    v_device_id varchar2(12);
+    v_text varchar2(10);
+    type ref_cursor is REF CURSOR;
+  
+      detail_cur ref_cursor;
+    begin  
+      fHandle := UTL_FILE.FOPEN('EX_DATA_BE', 'RB_PROMO_DEVICES_' || v_sysdatetime  || '.txt' , 'w');
+      --v_log := '"'|| select bss_reports.pkg_fun.getcarrotcampaignheader(to_date('11-JUN-2014')) from dual; ||'"';
+      --v_log := 'select bss_reports.pkg_fun.getcarrotcampaignheader(to_date('||v_date||')) from dual';
+      -- Write Header --
+      select bss_reports.pkg_fun.getcarrotdevicesheader(to_date(v_date)) into v_log from dual;
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+      
+      SELECT 
+      LPAD (row_number() over (order by PARTICIPANT_ID,DEVICE_ID), 8, '0'),PARTICIPANT_ID, location_id, LOCATION_DESC, DEVICE_ID, DEVICE_TYPE
+      FROM (
+      SELECT DISTINCT
+      LPAD (first_value(DEVICE.device_status.PARTICIPANT_ID) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC),10,'0') PARTICIPANT_ID,
+      LPAD (first_value(DEVICE.device_status.LOCATION) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC),12,'0') location_id,
+      BSS.CDA.getLocationDesc(first_value(DEVICE.device_status.PARTICIPANT_ID) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC),
+      BSS.CDA.to_LocationID(first_value(DEVICE.device_status.LOCATION) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC))) LOCATION_DESC,
+      LPAD (first_value(DEVICE.device_status.DEVICE_ID) over (partition BY DEVICE.device_status.DEVICE_ID order by device_status."TIME" DESC), 12, '0') DEVICE_ID,
+      '01' DEVICE_TYPE
+      FROM DEVICE.device_status
+      left join device_status d on DEVICE.device_status.device_id = d.device_id and DEVICE.device_status.PARTICIPANT_ID = d.PARTICIPANT_ID
+      WHERE DEVICE.device_status.status in (3,5)
+      and d.ACTIVE = 'Y')
+      --WHERE LOCATION_DESC not like '{%'
+      ORDER BY PARTICIPANT_ID,DEVICE_ID;
+  
+  
+        loop  --loop detail--
+         Fetch detail_cur into v_row_number,v_sp_id,v_location_id,v_location_desc,v_device_id,v_text;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_row_number||'|'||v_sp_id||'|'||v_location_id||'|'||v_location_desc||'|'||v_device_id||'|'||v_text||'|'|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+
+    /*declare
+    fHandle UTL_FILE.FILE_TYPE;
+    v_log varchar2(200);
+    v_record_DETAIL VARCHAR2(500);
+    v_date date := trunc(sysdate-1) ;
+    v_settlement_date  varchar2(20);
+    v_sum_type varchar2(50);
+    v_total_amount varchar2(30);
+    v_txn_count varchar2(30);
+    v_avg_per_txn varchar2(30);
+    type ref_cursor is REF CURSOR;
+
+      detail_cur ref_cursor;
+     begin
+      fHandle := UTL_FILE.FOPEN('CRR_DIR', 'RB_Carrot_Member_vs_Non_Member_Analysis_' || v_sysdate  || '.csv' , 'w');
+      -- Write Header --
+      v_log := 'SETTLEMENT_DATE,SUMM_TYPE,TOTAL_AMOUNT,TXN_COUNT,AVG_PER_TXN';
+      UTL_FILE.PUT_LINE(fHandle, v_log);
+      
+      ------------------
+      -- Write Detail --
+      open detail_cur for 
+      
+  select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'SPEND-ALL' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+	, sum(TXN_COUNT)  AS "TXN_COUNT"
+	, round((sum(TOTAL_AMOUNT)/sum(TXN_COUNT)),2) AS "AVG_PER_TXN"
+	from (--TRANSIT-SPEND-ALL
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'TRANSIT-SPEND-ALL' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_exit a
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE in (91,93) 
+	AND a.ACQUIRER_ID in (1,4)
+	GROUP BY settlement_date
+	union
+  --RETAIL-SPEND-ALL
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'RETAIL-SPEND-ALL' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 13 
+	AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+	GROUP BY settlement_date
+  ) group by settlement_date
+  union
+  select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'SPEND-MEMBER' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+	, sum(TXN_COUNT)  AS "TXN_COUNT"
+	, round((sum(TOTAL_AMOUNT)/sum(TXN_COUNT)),2) AS "AVG_PER_TXN"
+	from (--TRANSIT-SPEND-MEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'TRANSIT-SPEND-MEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_exit a, carrot.member b
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND a.card_serial_number = b.CARD_SERIAL_NUMBER
+	AND UD_TYPE = 3 AND UD_SUBTYPE in (91,93)  
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND b.IS_ACTIVE = 'Y'
+	AND a.ACQUIRER_ID in (1,4)
+	GROUP BY settlement_date
+	union
+	--RETAIL-SPEND-MEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'RETAIL-SPEND-MEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a, carrot.member b
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND a.card_serial_number = b.CARD_SERIAL_NUMBER
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 13 
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND b.IS_ACTIVE = 'Y'
+	AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+	GROUP BY settlement_date
+  ) group by settlement_date
+  union
+  select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'SPEND-NONMEMBER' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+	, sum(TXN_COUNT)  AS "TXN_COUNT"
+	, round((sum(TOTAL_AMOUNT)/sum(TXN_COUNT)),2) AS "AVG_PER_TXN"
+	from (--TRANSIT-SPEND-NONMEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'TRANSIT-SPEND-NONMEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_exit a left join carrot.member b
+	on a.card_serial_number = b.CARD_SERIAL_NUMBER
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE in (91,93) 
+	AND a.ACQUIRER_ID in (1,4)
+	and b.CARD_SERIAL_NUMBER is null
+	GROUP BY settlement_date
+  union
+	--RETAIL-SPEND-NONMEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'RETAIL-SPEND-NONMEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a left join carrot.member b
+	on a.card_serial_number = b.CARD_SERIAL_NUMBER
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 13 
+	AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+	and b.CARD_SERIAL_NUMBER is null
+	GROUP BY settlement_date
+  ) group by settlement_date
+  union 
+  select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'TOPUP-ALL' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+	, sum(TXN_COUNT)  AS "TXN_COUNT"
+	, round((sum(TOTAL_AMOUNT)/sum(TXN_COUNT)),2) AS "AVG_PER_TXN"
+	from (--TRANSIT-TOPUP-ALL
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'TRANSIT-TOPUP-ALL' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+	AND a.ACQUIRER_ID in (1,4)
+	GROUP BY settlement_date
+  	union
+	--RETAIL-TOPUP-ALL
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'RETAIL-TOPUP-ALL' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+	AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+	GROUP BY settlement_date
+  ) group by settlement_date
+  	union
+    select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'TOPUP-MEMBER' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+	, sum(TXN_COUNT)  AS "TXN_COUNT"
+	, round((sum(TOTAL_AMOUNT)/sum(TXN_COUNT)),2) AS "AVG_PER_TXN"
+	from (--TRANSIT-TOPUP-MEMBER
+  SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'TRANSIT-TOPUP-MEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a, carrot.member b
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND a.card_serial_number = b.CARD_SERIAL_NUMBER
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND b.IS_ACTIVE = 'Y'
+	AND a.ACQUIRER_ID in (1,4)
+	GROUP BY settlement_date
+	union
+  --RETAIL-TOPUP-MEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'RETAIL-TOPUP-MEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a, carrot.member b
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND a.card_serial_number = b.CARD_SERIAL_NUMBER
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND b.IS_ACTIVE = 'Y'
+	AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+	GROUP BY settlement_date
+  ) group by settlement_date
+  union
+  select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'TOPUP-NONMEMBER' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+	, sum(TXN_COUNT)  AS "TXN_COUNT"
+	, round((sum(TOTAL_AMOUNT)/sum(TXN_COUNT)),2) AS "AVG_PER_TXN"
+	from (--TRANSIT-TOPUP-NONMEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'TRANSIT-TOPUP-NONMEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a left join carrot.member b
+	on a.card_serial_number = b.CARD_SERIAL_NUMBER
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+	AND a.ACQUIRER_ID in (1,4)
+	and b.CARD_SERIAL_NUMBER is null
+	GROUP BY settlement_date
+	union
+  	--RETAIL-TOPUP-NONMEMBER
+	SELECT to_char(settlement_date,'DD-MM-YYYY') AS "SETTLEMENT_DATE"
+	, 'RETAIL-TOPUP-NONMEMBER' as "SUMM_TYPE"
+	, sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+	, count(a.card_serial_number) AS "TXN_COUNT"
+	, round(avg(a.transaction_value),1)/100 AS "AVG_PER_TXN"
+	FROM cut.cut_pi_financial a left join carrot.member b
+	on a.card_serial_number = b.CARD_SERIAL_NUMBER
+	WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+	AND A.CCH_TXN_APPROVED = 'Y'
+	AND A.ISS_TXN_REFLECTION = 'N'
+	AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+	AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+	and b.CARD_SERIAL_NUMBER is null
+	GROUP BY settlement_date
+  ) group by settlement_date
+	union
+	--'RABBIT CARD COUNT'
+	SELECT  null AS "SETTLEMENT_DATE"
+	,'TOTAL RABBIT CARD' AS "SUMM_TYPE"
+	, count(ca.CSC_serial_number) as "TOTAL_AMOUNT"
+	, null AS "TXN_COUNT"
+	, null AS "AVG_PER_TXN"
+	FROM card_account ca, product_account pa, application_account aa
+       WHERE ca.account_state NOT IN (4, 6, 7)
+       AND pa.prod_type = 256
+       AND ca.csc_serial_number = pa.csc_serial_number(+)
+       AND ca.csc_lifecycle_count = pa.csc_lifecycle_count(+)
+       AND ca.csc_issuer_id = pa.csc_issuer_id(+)
+       AND ca.csc_type = pa.csc_type(+)
+       AND ca.csc_serial_number = aa.csc_serial_number(+)
+       AND ca.csc_lifecycle_count = aa.csc_lifecycle_count(+)
+       AND ca.csc_issuer_id = aa.csc_issuer_id(+)
+       AND ca.csc_type = aa.csc_type(+);
+  
+  
+        loop  --loop detail--
+         Fetch detail_cur into v_settlement_date,v_sum_type,v_total_amount,v_txn_count,v_avg_per_txn;
+            
+          Exit When detail_cur%NOTFOUND;
+            
+           v_log := v_settlement_date||','||v_sum_type||','||v_total_amount||','||v_txn_count||','||v_avg_per_txn||','|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail_cur;
+      UTL_FILE.FCLOSE(fHandle);
+    end;*/
+  
+  END CARROT_CAMPAIGN1;
+
+  procedure transit_retail_with_crr_mem as
+ begin
+          
+  declare
+        fHandle UTL_FILE.FILE_TYPE; 
+        v_date varchar2(11);
+        TYPE GenCurTyp IS REF CURSOR;
+        detail GenCurTyp;
+        v_SETTLEMENT_DATE varchar2(100);
+        v_CARROT_MEMBER varchar2(100);
+        v_TXN_VOLUME number;
+        v_CARD_VOLUME  number;
+        v_TOTAL_AMOUNT number;  
+        v_TOTAL_MEMBER number;
+        v_TXN_TYPE varchar2(100);
+        v_log varchar2(800);
+        v_detail_cur varchar2(11);
+
+      begin
+        fHandle :=utl_file.fopen('CRR_KIOSK','transit_and_retail_with_carrot_member_'|| to_char(sysdate-1,'YYYYMMDD') ||'.csv','w');--Opening a file
+        
+        v_log := 'SETTLEMENT_DATE,CARROT_MEMBER,TXN_VOLUME,CARD_VOLUME,TOTAL_AMOUNT,TOTAL_MEMBER,TXN_TYPE';
+        UTL_FILE.PUT_LINE(fHandle, v_log);
+      
+      -----------------Detail------------------  
+      open detail for 
+
+-- Purse use --
+select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, SUMM_TYPE
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	, sum(CARD_VOLUME) as CARD_VOLUME
+    , sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,TOTAL_MEMBER
+
+    ,case when ud_subtype = 13   then 'Purse Use Retail' end as TXN_TYPE1
+from 
+(--TRANSIT-SPEND-ALL
+ select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Non-Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME
+    ,sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_financial a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+            --AND A.CCH_TXN_APPROVED = 'Y'
+            and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE = 13 
+            --AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+            AND a.ACQUIRER_ID not in (1,4)
+            and b.CARD_SERIAL_NUMBER is null
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+     union 
+     select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME,
+    sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_financial a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+           -- AND A.CCH_TXN_APPROVED = 'Y'
+           and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE in (13) 
+           -- AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+           AND a.ACQUIRER_ID not in (1,4)
+            AND b.IS_ACTIVE = 'Y'
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+            
+    ) group by settlement_date,ud_subtype,SUMM_TYPE,TOTAL_MEMBER
+
+union
+
+-- Multiride Use On Exit,Purse Use On Exit  --
+select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, SUMM_TYPE
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	, sum(CARD_VOLUME) as CARD_VOLUME
+    , sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,TOTAL_MEMBER
+
+    ,case WHEN UD_SUBTYPE = 91   THEN 'Purse Use On Exit'
+WHEN UD_SUBTYPE = 93   THEN 'Multiride Use On Exit' end as TXN_TYPE1
+from 
+(--TRANSIT-SPEND-ALL
+ select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Non-Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME
+    ,sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_exit a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+           -- AND A.CCH_TXN_APPROVED = 'Y'
+            and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE in (91,93) 
+            AND a.ACQUIRER_ID in (1,4)
+            and b.CARD_SERIAL_NUMBER is null
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+     union 
+     select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME,
+    sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_exit a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+            --AND A.CCH_TXN_APPROVED = 'Y'
+            and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE in (91,93) 
+            AND a.ACQUIRER_ID in (1,4)
+            AND b.IS_ACTIVE = 'Y'
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype         
+    ) group by settlement_date,ud_subtype,SUMM_TYPE,TOTAL_MEMBER
+
+union
+
+-- Purse add transit --
+select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, SUMM_TYPE
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	, sum(CARD_VOLUME) as CARD_VOLUME
+    , sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,TOTAL_MEMBER
+
+    ,case when ud_subtype = 10   then 'Purse Add Transit' end as TXN_TYPE1
+from 
+(--TRANSIT-SPEND-ALL
+ select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Non-Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME
+    ,sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_financial a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+           -- AND A.CCH_TXN_APPROVED = 'Y'
+            and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+            AND a.ACQUIRER_ID in (1,4)
+            and b.CARD_SERIAL_NUMBER is null
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+     union 
+     select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME,
+    sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_financial a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+           -- AND A.CCH_TXN_APPROVED = 'Y'
+           and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE in (10) 
+            AND a.ACQUIRER_ID in (1,4)
+            AND b.IS_ACTIVE = 'Y'
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+            
+    ) group by settlement_date,ud_subtype,SUMM_TYPE,TOTAL_MEMBER
+
+-- Purse Add Retail --
+union 
+select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, SUMM_TYPE
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	, sum(CARD_VOLUME) as CARD_VOLUME
+    , sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,TOTAL_MEMBER
+
+    ,case when ud_subtype = 10   then 'Purse Add Retail' end as TXN_TYPE1
+from 
+(
+ select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Non-Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME
+    ,sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_financial a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+            --AND A.CCH_TXN_APPROVED = 'Y'
+            and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE = 10 
+           -- AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+           AND a.ACQUIRER_ID not in (1,4)
+            and b.CARD_SERIAL_NUMBER is null
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+     union 
+     select distinct(settlement_date)  AS "SETTLEMENT_DATE"
+	, 'Carrot Member' as "SUMM_TYPE"
+	, sum(TOTAL_AMOUNT) AS "TOTAL_AMOUNT"
+    ,sum(TOTAL_VOLUMN) as TOTAL_VOLUMN
+	,  sum("TXN_COUNT2") as CARD_VOLUME,
+    sum("TOTAL_MEMBER") as TOTAL_MEMBER
+    ,ud_subtype
+	from (--TRANSIT-TOPUP-NONMEMBER
+            SELECT to_char(settlement_date,'DD/MM/YYYY') AS "SETTLEMENT_DATE"
+            , ' ' as "SUMM_TYPE"
+            , sum(a.transaction_value)/100 AS "TOTAL_AMOUNT"
+            ,count( a.transaction_value) AS "TOTAL_VOLUMN"
+            ,count(distinct a.card_serial_number) AS "TXN_COUNT2"
+            ,count(distinct b.carrot_id) AS "TOTAL_MEMBER"
+            ,ud_subtype
+            FROM cut.cut_pi_financial a left join carrot.member b
+            on a.card_serial_number = b.CARD_SERIAL_NUMBER
+            WHERE settlement_date = (select max(settlement_date) FROM CUT.STREAMING_SESSION_HISTORY)-1
+            --AND A.CCH_TXN_APPROVED = 'Y'
+            and(exception_list IS NULL OR exception_list NOT LIKE '%DDT%')
+            AND A.ISS_TXN_REFLECTION = 'N'
+            AND UD_TYPE = 3 AND UD_SUBTYPE in (10) 
+            --AND ((a.ACQUIRER_ID = 11) OR (a.ACQUIRER_ID = 12))
+            AND a.ACQUIRER_ID not in (1,4)
+            AND b.IS_ACTIVE = 'Y'
+            GROUP BY settlement_date,ud_subtype                                          
+            )group by settlement_date,ud_subtype
+            
+    ) group by settlement_date,ud_subtype,SUMM_TYPE,TOTAL_MEMBER
+    
+
+union
+-- summ--
+	--'RABBIT CARD COUNT'
+	SELECT  to_char(sysdate-1,'DD/MM/YYYY')  AS "SETTLEMENT_DATE"
+	,'TOTAL RABBIT CARD' AS "SUMM_TYPE"
+	, count(ca.CSC_serial_number) as "TOTAL_AMOUNT"
+	, null as TOTAL_VOLUMN
+	, null as CARD_VOLUME,
+      null  as TOTAL_MEMBER
+    ,null as ud_subtype  
+    
+    FROM card_account ca, product_account pa, application_account aa
+       WHERE ca.account_state NOT IN (4, 6, 7)
+       AND pa.prod_type = 256
+       AND ca.csc_serial_number = pa.csc_serial_number(+)
+       AND ca.csc_lifecycle_count = pa.csc_lifecycle_count(+)
+       AND ca.csc_issuer_id = pa.csc_issuer_id(+)
+       AND ca.csc_type = pa.csc_type(+)
+       AND ca.csc_serial_number = aa.csc_serial_number(+)
+       AND ca.csc_lifecycle_count = aa.csc_lifecycle_count(+)
+       AND ca.csc_issuer_id = aa.csc_issuer_id(+)
+       AND ca.csc_type = aa.csc_type(+)
+      group by to_char(sysdate-1,'DD/MM/YYYY') 
+order by TXN_TYPE1      
+;
+
+loop  --loop detail--
+         Fetch detail into v_SETTLEMENT_DATE,v_CARROT_MEMBER,v_TXN_VOLUME,v_CARD_VOLUME,v_TOTAL_AMOUNT,v_TOTAL_MEMBER,v_TXN_TYPE;
+            
+          Exit When detail%NOTFOUND;
+            
+           v_log := v_SETTLEMENT_DATE||','||v_CARROT_MEMBER||','||v_TXN_VOLUME||','||v_CARD_VOLUME||','||v_TOTAL_AMOUNT||','||v_TOTAL_MEMBER||','||v_TXN_TYPE||','|| CHR(13); 
+          
+          UTL_FILE.PUT_LINE(fHandle, v_log);
+          UTL_FILE.FFLUSH(fHandle);
+
+        end loop;--end loop detail--
+        close detail;
+      UTL_FILE.FCLOSE(fHandle);
+    end;
+
+end transit_retail_with_crr_mem;
+
+
+
+END X_CRR_TEMP;
